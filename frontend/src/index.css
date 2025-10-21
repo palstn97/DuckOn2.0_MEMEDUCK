@@ -1,0 +1,21 @@
+@import url("https://spoqa.github.io/spoqa-han-sans/css/SpoqaHanSansNeo.css");
+@import "tailwindcss";
+@font-face {
+  font-family: "Pretendard-Regular";
+  src: url("https://fastly.jsdelivr.net/gh/Project-Noonnu/noonfonts_2107@1.1/Pretendard-Regular.woff")
+    format("woff");
+  font-weight: 400;
+  font-style: normal;
+}
+body {
+  font-family: "Spoqa Han Sans Neo", sans-serif;
+}
+
+/* iOS Safari 전용: 입력 포커스 확대 방지 */
+@supports (-webkit-touch-callout: none) {
+  html { -webkit-text-size-adjust: 100%; }
+  input, textarea, select {
+    font-size: 16px; /* 16px 미만이면 자동 줌됨 */
+    line-height: 1.25;
+  }
+}
