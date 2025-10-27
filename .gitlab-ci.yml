@@ -97,8 +97,8 @@ deploy_prod:
     cd "$WORKDIR"
 
     # 필수 env 파일 체크 (없으면 바로 이유를 보여주자)
-    if [ ! -f /srv/duckon/prod.env ]; then
-      echo "[ERROR] /srv/duckon/prod.env not found"
+    if [ ! -f /srv/duckon/compose/prod.env ]; then
+      echo "[ERROR] /srv/duckon/compose/prod.env not found"
       ls -l /srv/duckon || true
       exit 23
     fi
@@ -122,7 +122,7 @@ deploy_prod:
     docker rm -f "${BE_APP}" 2>/dev/null || true
     docker run -d --name "${BE_APP}" \
       --network "$NET" \
-      --env-file "/srv/duckon/prod.env" \
+      --env-file "/srv/duckon/compose/prod.env" \
       -e SPRING_PROFILES_ACTIVE=prod \
       -e JAVA_OPTS="-Xms256m -Xmx512m" \
       --restart unless-stopped \
