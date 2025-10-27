@@ -1,66 +1,65 @@
 pipeline {
   agent any
   options {
-    timestamps()         // 로그에 시간 표시
-    ansiColor('xterm')   // 컬러 출력
+    timestamps()
+    ansiColor('xterm')
   }
 
   environment {
-    REPO_DIR = '/home/ubuntu/repos/duckon'           // EC2 내 클론 경로
-    COMPOSE_FILE = 'docker-compose.dev.yml'          // 사용할 Compose 파일
-    BRANCH_NAME = 'develop'                          // 빌드 대상 브랜치
+    REPO_DIR     = "${WORKSPACE}"              // 🔧 여기만 변경
+    COMPOSE_FILE = "docker-compose.dev.yml"
+    BRANCH_NAME  = "develop"
+    BE_SERVICE   = "backend"
+    BE_HEALTH_URL = "http://localhost:8080/actuator/health"
   }
 
   stages {
-
-    stage('Checkout') {
-      steps {
-        echo "📦 Checking out source from GitLab..."
-        checkout([
-          $class: 'GitSCM',
-          branches: [[name: "*/${env.BRANCH_NAME}"]],
-          userRemoteConfigs: [[
-            url: 'https://lab.ssafy.com/s13-final/S13P31A406.git',
-            credentialsId: 'git_token'   // Jenkins Credentials에 등록된 GitLab Token ID
-          ]]
-        ])
-      }
-    }
+    // ✅ 이 스테이지는 아예 없애도 됩니다. 이미 위에서 체크아웃 완료됨.
+    // stage('Checkout') {
+    //   steps { checkout scm }
+    // }
 
     stage('Build & Deploy') {
       steps {
         echo "🚀 Building and Deploying containers..."
-        sh """
-          cd ${REPO_DIR}
-          docker compose -f ${COMPOSE_FILE} pull || true
-          docker compose -f ${COMPOSE_FILE} up -d --build
-        """
+        dir("${REPO_DIR}") {
+          sh """
+            docker compose -f ${COMPOSE_FILE} pull || true
+            docker compose -f ${COMPOSE_FILE} up -d --build
+          """
+        }
       }
     }
 
     stage('Health Check') {
       steps {
         echo "🔍 Checking backend health..."
-        sh """
-          sleep 10
-          STATUS_CODE=\$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/actuator/health || true)
-          if [ "\$STATUS_CODE" = "200" ]; then
-            echo "✅ Backend is healthy!"
-          else
-            echo "❌ Backend health check failed with code \$STATUS_CODE"
+        dir("${REPO_DIR}") {
+          sh """
+            set -e
+            RETRIES=12
+            i=0
+            until [ \$i -ge \$RETRIES ]; do
+              STATUS=\$(docker compose -f ${COMPOSE_FILE} exec -T ${BE_SERVICE} \
+                sh -lc "curl -s -o /dev/null -w '%{http_code}' ${BE_HEALTH_URL}" || true)
+              echo "Health HTTP status: \$STATUS"
+              if [ "\$STATUS" = "200" ]; then
+                echo "✅ Backend is healthy!"
+                exit 0
+              fi
+              i=\$((i+1))
+              sleep 5
+            done
+            echo "❌ Backend health check failed"
             exit 1
-          fi
-        """
+          """
+        }
       }
     }
   }
 
   post {
-    success {
-      echo "✅ Deploy success!"
-    }
-    failure {
-      echo "❌ Deploy failed! Check Jenkins logs."
-    }
+    success { echo "✅ Deploy success!" }
+    failure { echo "❌ Deploy failed! Check Jenkins logs." }
   }
 }
