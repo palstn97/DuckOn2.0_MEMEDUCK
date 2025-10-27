@@ -98,7 +98,7 @@ deploy_prod:
     [ -z "$NET" ] && NET="bridge"
     echo "Using network: $NET"
 
-    WORKDIR="/srv/duckon/repo"
+    WORKDIR="/srv/duckon/repo/S13P31A406"
     mkdir -p "$WORKDIR"
     cd "$WORKDIR"
 
