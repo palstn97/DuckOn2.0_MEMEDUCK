@@ -142,8 +142,10 @@ deploy_prod:
 
     echo "[FE] docker build (VITE_API_BASE_URL=${VITE_API_BASE_URL_PROD:-/api})"
     docker build \
+      --pull --no-cache \
       --build-arg NGINX_CONF=nginx.prod.conf \
       --build-arg VITE_API_BASE_URL="${VITE_API_BASE_URL_PROD:-/api}" \
+      --build-arg BUILD_NOCACHE="$(date +%s)" \
       -t duckon-front:prod \
       -f frontend/Dockerfile frontend
 
