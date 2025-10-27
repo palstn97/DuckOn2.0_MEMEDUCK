@@ -78,45 +78,32 @@ deploy_prod:
     - export AWS_DEFAULT_REGION="$AWS_REGION_PROD"
     - aws sts get-caller-identity
   script: |
-    echo "[Build remote deployment script]"
-    cat > remote-script.sh <<'EOS'
+    cat > remote.sh <<'EOS'
     set -eux
 
-    # 사전 진단 (문제시 바로 이유가 보이도록)
-    command -v docker || { echo "[ERROR] docker not installed"; exit 21; }
-    command -v git    || { echo "[ERROR] git not installed";    exit 22; }
-    command -v curl   || { echo "[WARN] curl missing; installing may be needed"; }
-
-    # 네트워크 선택
-    NET=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s " $k}}{{end}}' duckon-proxy 2>/dev/null | awk '{print $1}')
-    [ -z "$NET" ] && NET="bridge"
-    echo "Using network: $NET"
-
-    cat > remote-script.sh <<'EOS'
-    set -eux
-    NET=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s " $k}}{{end}}' duckon-proxy 2>/dev/null | awk '{print $1}')
-    [ -z "$NET" ] && NET="bridge"
-    echo "Using network: $NET"
-
-    WORKDIR="/srv/duckon/repo/S13P31A406"
-    mkdir -p "$WORKDIR"
-    cd "$WORKDIR"
-
-    ENV_FILE="/srv/duckon/compose/prod.env"
-    if [ ! -f "$ENV_FILE" ]; then
-      CAND=$(find /srv/duckon -maxdepth 3 -type f -name "prod.env" 2>/dev/null | head -n1 || true)
-      if [ -n "$CAND" ]; then
-        echo "[warn] ENV_FILE not found at default. Using detected: $CAND"
-        ENV_FILE="$CAND"
+    NET=""
+    if docker inspect duckon-proxy >/dev/null 2>&1; then
+      NET=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s " $k}}{{end}}' duckon-proxy | awk '{print $1}')
+    fi
+    if [ -z "$NET" ]; then
+      if docker network ls --format '{{.Name}}' | grep -q '^duckon-net$'; then
+        NET="duckon-net"
+      else
+        docker network create duckon-net >/dev/null 2>&1 || true
+        NET="duckon-net"
       fi
     fi
-    if [ ! -f "$ENV_FILE" ]; then
-      echo "[ERROR] env file not found (looked at /srv/duckon/compose/prod.env and under /srv/duckon/*)"
-      ls -l /srv/duckon /srv/duckon/compose || true
-      exit 23
-    fi
-    # 코드 동기화
-    ORIGIN="https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+    echo "[NET] $NET"
+
+    WORKDIR="/srv/duckon/repo/S13P31A406"
+    mkdir -p "$WORKDIR"; cd "$WORKDIR"
+
+    ORIGIN="https://gitlab-ci-token:__CI_JOB_TOKEN__@__CI_SERVER_HOST__/__CI_PROJECT_PATH__.git"
+    COMMIT="__CI_COMMIT_SHA__"
+    BE_APP="__BE_APP__"
+    FE_APP="__FE_APP__"
+    VITE_API="__VITE_API_BASE_URL_PROD__"
+
     if [ -d .git ]; then
       git remote set-url origin "$ORIGIN"
       git fetch --all --prune
@@ -125,14 +112,17 @@ deploy_prod:
       git remote add origin "$ORIGIN"
       git fetch origin
     fi
-    git reset --hard "${CI_COMMIT_SHA}"
+    git reset --hard "$COMMIT"
+    echo "[git] HEAD=$(git rev-parse --short HEAD)"
+    git remote -v
 
-    echo "[BE] docker build"
+    ENV_FILE="/srv/duckon/compose/prod.env"
+    [ -f "$ENV_FILE" ] || { echo "[ERROR] $ENV_FILE not found"; exit 23; }
+
+    echo "[BE] build & restart"
     docker build -t duckonback:prod -f backend/Dockerfile backend
-
-    echo "[BE] restart ${BE_APP}"
-    docker rm -f "${BE_APP}" 2>/dev/null || true
-    docker run -d --name "${BE_APP}" \
+    docker rm -f "$BE_APP" 2>/dev/null || true
+    docker run -d --name "$BE_APP" \
       --network "$NET" \
       --env-file "$ENV_FILE" \
       -e SPRING_PROFILES_ACTIVE=prod \
@@ -140,25 +130,24 @@ deploy_prod:
       --restart unless-stopped \
       duckonback:prod
 
-    echo "[FE] docker build (VITE_API_BASE_URL=${VITE_API_BASE_URL_PROD:-/api})"
+    echo "[FE] build (cache-bust) & restart"
     docker build \
-      --pull --no-cache \
+      --pull --no-cache \z
       --build-arg NGINX_CONF=nginx.prod.conf \
-      --build-arg VITE_API_BASE_URL="${VITE_API_BASE_URL_PROD:-/api}" \
+      --build-arg VITE_API_BASE_URL="${VITE_API:-/api}" \
       --build-arg BUILD_NOCACHE="$(date +%s)" \
       -t duckon-front:prod \
       -f frontend/Dockerfile frontend
 
-    echo "[FE] restart ${FE_APP}"
-    docker rm -f "${FE_APP}" 2>/dev/null || true
-    docker run -d --name "${FE_APP}" \
+    docker rm -f "$FE_APP" 2>/dev/null || true
+    docker run -d --name "$FE_APP" \
       --network "$NET" \
       --restart unless-stopped \
       duckon-front:prod
 
     docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 
-    echo "[Healthcheck]"
+    echo "[healthcheck]"
     i=1
     while [ $i -le 30 ]; do
       code=$(curl -ksS -o /dev/null -w "%{http_code}" https://duckon.site/api/actuator/health || true)
@@ -168,47 +157,35 @@ deploy_prod:
     echo "healthcheck failed"; exit 31
     EOS
 
-    # JSON 파라미터로 안전하게 전달
-    jq -n --arg script "$(cat remote-script.sh)" '{commands: [$script]}' > ssm-params.json
+    sed -i \
+      -e "s|__CI_JOB_TOKEN__|$CI_JOB_TOKEN|g" \
+      -e "s|__CI_SERVER_HOST__|$CI_SERVER_HOST|g" \
+      -e "s|__CI_PROJECT_PATH__|$CI_PROJECT_PATH|g" \
+      -e "s|__CI_COMMIT_SHA__|$CI_COMMIT_SHA|g" \
+      -e "s|__BE_APP__|$BE_APP|g" \
+      -e "s|__FE_APP__|$FE_APP|g" \
+      -e "s|__VITE_API_BASE_URL_PROD__|${VITE_API_BASE_URL_PROD:-/api}|g" \
+      remote.sh
 
-    echo "[Send command to SSM]"
+    jq -n --arg script "$(cat remote.sh)" '{commands: [$script]}' > ssm-params.json
+
     CMD_ID=$(aws ssm send-command \
       --instance-ids "$PROD_INSTANCE_ID" \
       --document-name "AWS-RunShellScript" \
       --comment "DuckOn prod deploy $CI_COMMIT_SHA" \
       --parameters file://ssm-params.json \
-      --query "Command.CommandId" \
-      --output text)
+      --query "Command.CommandId" --output text)
     echo "CommandId: $CMD_ID"
 
-    echo "[Poll & print logs until terminal state]"
-    # 실패여도 반드시 원격 STDOUT/STDERR를 출력
     while :; do
       OUT=$(aws ssm get-command-invocation \
         --command-id "$CMD_ID" \
         --instance-id "$PROD_INSTANCE_ID" \
         --output json || true)
-
       STATUS=$(echo "$OUT" | jq -r '.Status // empty')
-      STDOUT=$(echo "$OUT" | jq -r '.StandardOutputContent // ""')
-      STDERR=$(echo "$OUT" | jq -r '.StandardErrorContent // ""')
-
-      echo "SSM Status: ${STATUS:-unknown}"
-      [ -n "$STDOUT" ] && echo "----- STDOUT -----"$'\n'"$STDOUT"
-      [ -n "$STDERR" ] && echo "----- STDERR -----"$'\n'"$ERR"
-
-      case "$STATUS" in
-        Pending|InProgress|Delayed|"")
-          sleep 3
-          ;;
-        Success)
-          exit 0
-          ;;
-        Cancelled|TimedOut|Failed|Cancelling)
-          # 실패여도 마지막 로그를 보고 종료 코드 1로 명확히 실패 처리
-          echo "----- END LOGS -----"
-          echo "$OUT" | jq -r '.StandardErrorContent // ""'
-          exit 1
-          ;;
-      esac
+      echo "SSM: ${STATUS:-unknown}"
+      [ "$STATUS" = "Pending" ] || [ "$STATUS" = "InProgress" ] || [ "$STATUS" = "Delayed" ] || [ -z "$STATUS" ] && { sleep 3; continue; }
+      echo "----- STDOUT -----"; echo "$OUT" | jq -r '.StandardOutputContent // ""'
+      echo "----- STDERR -----"; echo "$OUT" | jq -r '.StandardErrorContent // ""'
+      [ "$STATUS" = "Success" ] && exit 0 || exit 1
     done
