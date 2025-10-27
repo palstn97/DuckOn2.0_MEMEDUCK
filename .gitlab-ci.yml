@@ -132,7 +132,7 @@ deploy_prod:
 
     echo "[FE] build (cache-bust) & restart"
     docker build \
-      --pull --no-cache \z
+      --pull --no-cache \
       --build-arg NGINX_CONF=nginx.prod.conf \
       --build-arg VITE_API_BASE_URL="${VITE_API:-/api}" \
       --build-arg BUILD_NOCACHE="$(date +%s)" \
