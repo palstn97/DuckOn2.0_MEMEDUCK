@@ -58,24 +58,30 @@ build_frontend:
 # ───────────────────────────────────────────────────────────
 deploy_prod:
   stage: deploy
-  <<: *default_tags
-  image: amazon/aws-cli:2.17.60
-  # 배포는 master "push"일 때만
+  tags: ["duckon","dind"]
+  image:
+    name: amazon/aws-cli:2.17.60
+    entrypoint: ["/bin/sh","-lc"]   # aws 엔트리포인트 무력화하고 셸로 실행
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"'
     - when: never
   needs: [build_backend, build_frontend]
-  before_script: []   # (중요) 기본 before_script 상속 방지
+  before_script:
+    - set -euo pipefail
+    # PROD 변수 → AWS 표준 변수로 매핑
+    - export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID_PROD"
+    - export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY_PROD"
+    - export AWS_DEFAULT_REGION="${AWS_REGION_PROD}"
+    - aws sts get-caller-identity >/dev/null
   script: |
-    set -euo pipefail
-    aws configure set region "$AWS_REGION_PROD"
-    aws sts get-caller-identity >/dev/null
+    # 지역 설정(가독용, 없어도 AWS_DEFAULT_REGION로 동작)
+    aws configure set region "$AWS_DEFAULT_REGION"
 
-    # 원격에서 실행될 스크립트(EC2 내부에서 수행)
+    BE_REPO="(not used in no-registry mode)"; FE_REPO="(not used)"; TAG="$CI_COMMIT_SHA"
+    BE_LATEST="prod-latest"; FE_LATEST="prod-latest"
+
     read -r -d '' REMOTE <<'EOS'
     set -eu
-
-    # ===== 파라미터 (CI에서 치환됨) =====
     CI_HOST="__CI_SERVER_HOST__"
     CI_PATH="__CI_PROJECT_PATH__"
     CI_TOKEN="__CI_JOB_TOKEN__"
@@ -84,20 +90,15 @@ deploy_prod:
     BE_APP="__BE_APP__"
     FE_APP="__FE_APP__"
 
-    # ===== 공통 준비 =====
-    # duckon-proxy와 같은 네트워크(없으면 bridge)
     NET=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s " $k}}{{end}}' duckon-proxy 2>/dev/null | awk '{print $1}')
     [ -z "$NET" ] && NET="bridge"
     echo "[NET] $NET"
 
-    # 코드 위치
     WORKDIR="/srv/duckon/app"
     mkdir -p "$WORKDIR"
     cd "$WORKDIR"
 
-    # 토큰 포함 origin (로그 노출 방지를 위해 echo 하지 않음)
     ORIGIN="https://gitlab-ci-token:${CI_TOKEN}@${CI_HOST}/${CI_PATH}.git"
-
     if [ -d .git ]; then
       git remote set-url origin "$ORIGIN"
       git fetch --all --prune
@@ -106,15 +107,12 @@ deploy_prod:
       git remote add origin "$ORIGIN"
       git fetch origin
     fi
-
-    # 정확히 해당 커밋으로 맞춰 배포
     git reset --hard "$COMMIT"
 
-    # ====== BACKEND 빌드/배포 ======
     echo "[BE] docker build"
     docker build -t duckonback:prod -f backend/Dockerfile backend
 
-    echo "[BE] restart container $BE_APP"
+    echo "[BE] restart $BE_APP"
     docker rm -f "$BE_APP" 2>/dev/null || true
     docker run -d --name "$BE_APP" \
       --network "$NET" \
@@ -124,7 +122,6 @@ deploy_prod:
       --restart unless-stopped \
       duckonback:prod
 
-    # ====== FRONTEND 빌드/배포 ======
     echo "[FE] docker build (VITE_API_BASE_URL=${VITE_API})"
     docker build \
       --build-arg NGINX_CONF=nginx.prod.conf \
@@ -132,7 +129,7 @@ deploy_prod:
       -t duckonfront:prod \
       -f frontend/Dockerfile frontend
 
-    echo "[FE] restart container $FE_APP"
+    echo "[FE] restart $FE_APP"
     docker rm -f "$FE_APP" 2>/dev/null || true
     docker run -d --name "$FE_APP" \
       --network "$NET" \
@@ -141,22 +138,17 @@ deploy_prod:
 
     docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 
-    # 간단 헬스체크
     i=1
     while [ $i -le 30 ]; do
       code=$(curl -ksS -o /dev/null -w "%{http_code}" https://duckon.site/api/actuator/health || true)
       [ "$code" = "200" ] || [ "$code" = "401" ] && { echo "BE health OK ($code)"; break; }
       echo "BE health retry $i/30..."; i=$((i+1)); sleep 3
     done
-
-    echo "[FE] HEAD /"
     curl -sI https://duckon.site | head -n1 || true
 
-    # (선택) 토큰 제거를 위해 origin을 일반 URL로 되돌림
     git remote set-url origin "https://${CI_HOST}/${CI_PATH}.git" || true
     EOS
 
-    # ===== 자리표시자 치환 (로컬에서만 확장) =====
     REMOTE="${REMOTE//__CI_SERVER_HOST__/$CI_SERVER_HOST}"
     REMOTE="${REMOTE//__CI_PROJECT_PATH__/$CI_PROJECT_PATH}"
     REMOTE="${REMOTE//__CI_JOB_TOKEN__/$CI_JOB_TOKEN}"
@@ -165,7 +157,6 @@ deploy_prod:
     REMOTE="${REMOTE//__BE_APP__/$BE_APP}"
     REMOTE="${REMOTE//__FE_APP__/$FE_APP}"
 
-    # SSM으로 원격 실행
     CMD_ID=$(aws ssm send-command \
       --instance-ids "$PROD_INSTANCE_ID" \
       --document-name "AWS-RunShellScript" \
