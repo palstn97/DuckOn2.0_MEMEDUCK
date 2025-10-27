@@ -1,0 +1,179 @@
+# ───────────────────────────────────────────────────────────
+# 파이프라인 생성 조건
+#  - MR 타겟이 master → 빌드만
+#  - master 에 push/merge → 빌드 후 배포
+# ───────────────────────────────────────────────────────────
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"'
+    - if: '$CI_COMMIT_BRANCH == "master"'
+    - when: never
+
+stages: [build, deploy]
+
+# 전역 변수 (레지스트리 의존 없음)
+variables:
+  BE_APP: "duckon-app-prod"
+  FE_APP: "duckon-front-prod"
+
+# 러너 태그(너가 만든 전용 러너)
+.default_tags: &default_tags
+  tags: ["duckon","dind"]
+
+# ───────────────────────────────────────────────────────────
+# BE 빌드 (Gradle)
+# ───────────────────────────────────────────────────────────
+build_backend:
+  stage: build
+  <<: *default_tags
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"'
+    - if: '$CI_COMMIT_BRANCH == "master"'
+  image: gradle:8.6-jdk21
+  variables:
+    GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
+  script:
+    - cd backend
+    - chmod +x ./gradlew || true
+    - ./gradlew --no-daemon clean build
+
+# ───────────────────────────────────────────────────────────
+# FE 빌드 (Node/Vite) - 레지스트리 불필요
+# ───────────────────────────────────────────────────────────
+build_frontend:
+  stage: build
+  <<: *default_tags
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"'
+    - if: '$CI_COMMIT_BRANCH == "master"'
+  image: node:20-alpine
+  script:
+    - cd frontend
+    - npm ci
+    # 빌드타임 변수 필요시 주입 (없으면 기본값으로 빌드됨)
+    - VITE_API_BASE_URL="${VITE_API_BASE_URL_PROD:-/api}" npm run build
+
+# ───────────────────────────────────────────────────────────
+# PROD 배포 (AWS SSM) - 원격 EC2에서 git+docker build/run
+# ───────────────────────────────────────────────────────────
+deploy_prod:
+  stage: deploy
+  <<: *default_tags
+  image: amazon/aws-cli:2.17.60
+  # 배포는 master "push"일 때만
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"'
+    - when: never
+  needs: [build_backend, build_frontend]
+  before_script: []   # (중요) 기본 before_script 상속 방지
+  script: |
+    set -euo pipefail
+    aws configure set region "$AWS_REGION_PROD"
+    aws sts get-caller-identity >/dev/null
+
+    # 원격에서 실행될 스크립트(EC2 내부에서 수행)
+    read -r -d '' REMOTE <<'EOS'
+    set -eu
+
+    # ===== 파라미터 (CI에서 치환됨) =====
+    CI_HOST="__CI_SERVER_HOST__"
+    CI_PATH="__CI_PROJECT_PATH__"
+    CI_TOKEN="__CI_JOB_TOKEN__"
+    COMMIT="__COMMIT_SHA__"
+    VITE_API="__VITE_API_BASE_URL_PROD__"
+    BE_APP="__BE_APP__"
+    FE_APP="__FE_APP__"
+
+    # ===== 공통 준비 =====
+    # duckon-proxy와 같은 네트워크(없으면 bridge)
+    NET=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s " $k}}{{end}}' duckon-proxy 2>/dev/null | awk '{print $1}')
+    [ -z "$NET" ] && NET="bridge"
+    echo "[NET] $NET"
+
+    # 코드 위치
+    WORKDIR="/srv/duckon/app"
+    mkdir -p "$WORKDIR"
+    cd "$WORKDIR"
+
+    # 토큰 포함 origin (로그 노출 방지를 위해 echo 하지 않음)
+    ORIGIN="https://gitlab-ci-token:${CI_TOKEN}@${CI_HOST}/${CI_PATH}.git"
+
+    if [ -d .git ]; then
+      git remote set-url origin "$ORIGIN"
+      git fetch --all --prune
+    else
+      git init
+      git remote add origin "$ORIGIN"
+      git fetch origin
+    fi
+
+    # 정확히 해당 커밋으로 맞춰 배포
+    git reset --hard "$COMMIT"
+
+    # ====== BACKEND 빌드/배포 ======
+    echo "[BE] docker build"
+    docker build -t duckonback:prod -f backend/Dockerfile backend
+
+    echo "[BE] restart container $BE_APP"
+    docker rm -f "$BE_APP" 2>/dev/null || true
+    docker run -d --name "$BE_APP" \
+      --network "$NET" \
+      --env-file "/srv/duckon/prod.env" \
+      -e SPRING_PROFILES_ACTIVE=prod \
+      -e JAVA_OPTS="-Xms256m -Xmx512m" \
+      --restart unless-stopped \
+      duckonback:prod
+
+    # ====== FRONTEND 빌드/배포 ======
+    echo "[FE] docker build (VITE_API_BASE_URL=${VITE_API})"
+    docker build \
+      --build-arg NGINX_CONF=nginx.prod.conf \
+      --build-arg VITE_API_BASE_URL="${VITE_API}" \
+      -t duckonfront:prod \
+      -f frontend/Dockerfile frontend
+
+    echo "[FE] restart container $FE_APP"
+    docker rm -f "$FE_APP" 2>/dev/null || true
+    docker run -d --name "$FE_APP" \
+      --network "$NET" \
+      --restart unless-stopped \
+      duckonfront:prod
+
+    docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+
+    # 간단 헬스체크
+    i=1
+    while [ $i -le 30 ]; do
+      code=$(curl -ksS -o /dev/null -w "%{http_code}" https://duckon.site/api/actuator/health || true)
+      [ "$code" = "200" ] || [ "$code" = "401" ] && { echo "BE health OK ($code)"; break; }
+      echo "BE health retry $i/30..."; i=$((i+1)); sleep 3
+    done
+
+    echo "[FE] HEAD /"
+    curl -sI https://duckon.site | head -n1 || true
+
+    # (선택) 토큰 제거를 위해 origin을 일반 URL로 되돌림
+    git remote set-url origin "https://${CI_HOST}/${CI_PATH}.git" || true
+    EOS
+
+    # ===== 자리표시자 치환 (로컬에서만 확장) =====
+    REMOTE="${REMOTE//__CI_SERVER_HOST__/$CI_SERVER_HOST}"
+    REMOTE="${REMOTE//__CI_PROJECT_PATH__/$CI_PROJECT_PATH}"
+    REMOTE="${REMOTE//__CI_JOB_TOKEN__/$CI_JOB_TOKEN}"
+    REMOTE="${REMOTE//__COMMIT_SHA__/$CI_COMMIT_SHA}"
+    REMOTE="${REMOTE//__VITE_API_BASE_URL_PROD__/${VITE_API_BASE_URL_PROD:-/api}}"
+    REMOTE="${REMOTE//__BE_APP__/$BE_APP}"
+    REMOTE="${REMOTE//__FE_APP__/$FE_APP}"
+
+    # SSM으로 원격 실행
+    CMD_ID=$(aws ssm send-command \
+      --instance-ids "$PROD_INSTANCE_ID" \
+      --document-name "AWS-RunShellScript" \
+      --comment "DuckOn Prod deploy $CI_COMMIT_SHA (no-registry mode)" \
+      --parameters commands="$REMOTE" \
+      --query "Command.CommandId" \
+      --output text)
+
+    echo "CommandId: $CMD_ID"
+    aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$PROD_INSTANCE_ID"
+    aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$PROD_INSTANCE_ID" --output table
