@@ -67,12 +67,14 @@ deploy_prod:
     - when: never
   needs: [build_backend, build_frontend]
   before_script:
-    - set -euo pipefail
-    # PROD 변수 → AWS 표준 변수로 매핑
+    - echo "[Check AWS vars]"
+    - echo "AWS_ACCESS_KEY_ID_PROD=${AWS_ACCESS_KEY_ID_PROD:-null}"
+    - echo "AWS_SECRET_ACCESS_KEY_PROD=${AWS_SECRET_ACCESS_KEY_PROD:+(set)}"
+    - echo "AWS_REGION_PROD=${AWS_REGION_PROD:-null}"
     - export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID_PROD"
     - export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY_PROD"
     - export AWS_DEFAULT_REGION="${AWS_REGION_PROD}"
-    - aws sts get-caller-identity >/dev/null
+    - aws sts get-caller-identity
   script: |
     # 지역 설정(가독용, 없어도 AWS_DEFAULT_REGION로 동작)
     aws configure set region "$AWS_DEFAULT_REGION"
