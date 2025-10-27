@@ -74,9 +74,10 @@ deploy_prod:
     - export AWS_DEFAULT_REGION="${AWS_REGION_PROD}"
     - aws sts get-caller-identity >/dev/null
   script: |
+    # 지역 설정
     aws configure set region "$AWS_DEFAULT_REGION"
 
-    # bash로 본문 실행
+    # bash로 본문 실행 (⚠️ 로컬에선 docker 금지, 전부 REMOTE로!)
     bash -lc '
     set -euo pipefail
 
@@ -88,10 +89,6 @@ deploy_prod:
     COMMIT="'"$CI_COMMIT_SHA"'"
     VITE_API="${VITE_API_BASE_URL_PROD:-/api}"
 
-    # ── 네트워크: 고정 이름 사용 (동적 탐색 제거)
-    NET="duckon-net"
-    docker network create "$NET" || true
-
     read -r -d "" REMOTE <<EOS
     set -eu
     CI_HOST="$CI_HOST"
@@ -101,7 +98,10 @@ deploy_prod:
     VITE_API="$VITE_API"
     BE_APP="$BE_APP"
     FE_APP="$FE_APP"
-    NET="$NET"
+
+    # ── (원격) 네트워크: 고정 이름 사용
+    NET="duckon-net"
+    docker network create "\$NET" 2>/dev/null || true
 
     WORKDIR="/srv/duckon/app"
     mkdir -p "\$WORKDIR"
@@ -158,15 +158,16 @@ deploy_prod:
     git remote set-url origin "https://\${CI_HOST}/\${CI_PATH}.git" || true
     EOS
 
+    # SSM 실행 (원격에서만 docker 사용)
     CMD_ID=$(aws ssm send-command \
-      --instance-ids "$PROD_INSTANCE_ID" \
+      --instance-ids "'"$PROD_INSTANCE_ID"'" \
       --document-name "AWS-RunShellScript" \
-      --comment "DuckOn Prod deploy $CI_COMMIT_SHA (no-registry mode)" \
+      --comment "DuckOn Prod deploy '"$CI_COMMIT_SHA"' (no-registry)" \
       --parameters commands="$REMOTE" \
       --query "Command.CommandId" \
       --output text)
 
     echo "CommandId: $CMD_ID"
-    aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$PROD_INSTANCE_ID"
-    aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$PROD_INSTANCE_ID" --output table
+    aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "'"$PROD_INSTANCE_ID"'"
+    aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "'"$PROD_INSTANCE_ID"'" --output table
     '
