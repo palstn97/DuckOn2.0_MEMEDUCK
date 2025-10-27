@@ -61,27 +61,24 @@ deploy_prod:
   tags: ["duckon","dind"]
   image:
     name: amazon/aws-cli:2.17.60
-    entrypoint: ["/bin/sh","-lc"]   # aws 엔트리포인트 무력화하고 셸로 실행
+    entrypoint: ["/bin/bash","-lc"]   # ✅ bash로 실행 (중요)
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"'
     - when: never
   needs: [build_backend, build_frontend]
   before_script:
-    - echo "[Check AWS vars]"
-    - echo "AWS_ACCESS_KEY_ID_PROD=${AWS_ACCESS_KEY_ID_PROD:-null}"
-    - echo "AWS_SECRET_ACCESS_KEY_PROD=${AWS_SECRET_ACCESS_KEY_PROD:+(set)}"
-    - echo "AWS_REGION_PROD=${AWS_REGION_PROD:-null}"
+    - set -euo pipefail
     - export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID_PROD"
     - export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY_PROD"
     - export AWS_DEFAULT_REGION="${AWS_REGION_PROD}"
-    - aws sts get-caller-identity
+    - aws sts get-caller-identity >/dev/null
   script: |
-    # 지역 설정(가독용, 없어도 AWS_DEFAULT_REGION로 동작)
     aws configure set region "$AWS_DEFAULT_REGION"
 
     BE_REPO="(not used in no-registry mode)"; FE_REPO="(not used)"; TAG="$CI_COMMIT_SHA"
     BE_LATEST="prod-latest"; FE_LATEST="prod-latest"
 
+    # ✅ 아래 bash 전용 문법들이 이제 정상 동작
     read -r -d '' REMOTE <<'EOS'
     set -eu
     CI_HOST="__CI_SERVER_HOST__"
