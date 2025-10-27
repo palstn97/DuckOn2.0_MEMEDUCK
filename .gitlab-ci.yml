@@ -80,7 +80,7 @@ deploy_prod:
   script: |
     echo "[Build remote deployment script]"
     cat > remote-script.sh <<'EOS'
-    set -euxo pipefail
+    set -eux
 
     # 사전 진단 (문제시 바로 이유가 보이도록)
     command -v docker || { echo "[ERROR] docker not installed"; exit 21; }
