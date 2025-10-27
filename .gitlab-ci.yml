@@ -144,7 +144,7 @@ deploy_prod:
     docker build \
       --build-arg NGINX_CONF=nginx.prod.conf \
       --build-arg VITE_API_BASE_URL="${VITE_API_BASE_URL_PROD:-/api}" \
-      -t duckonfront:prod \
+      -t duckon-front:prod \
       -f frontend/Dockerfile frontend
 
     echo "[FE] restart ${FE_APP}"
@@ -152,7 +152,7 @@ deploy_prod:
     docker run -d --name "${FE_APP}" \
       --network "$NET" \
       --restart unless-stopped \
-      duckonfront:prod
+      duckon-front:prod
 
     docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 
