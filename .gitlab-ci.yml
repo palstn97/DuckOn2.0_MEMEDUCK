@@ -92,17 +92,29 @@ deploy_prod:
     [ -z "$NET" ] && NET="bridge"
     echo "Using network: $NET"
 
+    cat > remote-script.sh <<'EOS'
+    set -eux
+    NET=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s " $k}}{{end}}' duckon-proxy 2>/dev/null | awk '{print $1}')
+    [ -z "$NET" ] && NET="bridge"
+    echo "Using network: $NET"
+
     WORKDIR="/srv/duckon/app"
     mkdir -p "$WORKDIR"
     cd "$WORKDIR"
 
-    # 필수 env 파일 체크 (없으면 바로 이유를 보여주자)
-    if [ ! -f /srv/duckon/compose/prod.env ]; then
-      echo "[ERROR] /srv/duckon/compose/prod.env not found"
-      ls -l /srv/duckon || true
+    ENV_FILE="/srv/duckon/compose/prod.env"
+    if [ ! -f "$ENV_FILE" ]; then
+      CAND=$(find /srv/duckon -maxdepth 3 -type f -name "prod.env" 2>/dev/null | head -n1 || true)
+      if [ -n "$CAND" ]; then
+        echo "[warn] ENV_FILE not found at default. Using detected: $CAND"
+        ENV_FILE="$CAND"
+      fi
+    fi
+    if [ ! -f "$ENV_FILE" ]; then
+      echo "[ERROR] env file not found (looked at /srv/duckon/compose/prod.env and under /srv/duckon/*)"
+      ls -l /srv/duckon /srv/duckon/compose || true
       exit 23
     fi
-
     # 코드 동기화
     ORIGIN="https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
     if [ -d .git ]; then
@@ -122,7 +134,7 @@ deploy_prod:
     docker rm -f "${BE_APP}" 2>/dev/null || true
     docker run -d --name "${BE_APP}" \
       --network "$NET" \
-      --env-file "/srv/duckon/compose/prod.env" \
+      --env-file "$ENV_FILE" \
       -e SPRING_PROFILES_ACTIVE=prod \
       -e JAVA_OPTS="-Xms256m -Xmx512m" \
       --restart unless-stopped \
