@@ -61,23 +61,23 @@ deploy_prod:
   tags: ["duckon","dind"]
   image:
     name: amazon/aws-cli:2.17.60
-    entrypoint: ["/bin/sh","-lc"]
+    entrypoint: ["/bin/sh","-lc"]      # sh 시작
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"'
     - when: never
   needs: [build_backend, build_frontend]
   before_script:
     - set -euo pipefail
-    - yum -y install bash
-    - export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID_PROD"
+    - yum -y install bash              # amazonlinux → yum
+    - export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_PROD"
     - export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY_PROD"
     - export AWS_DEFAULT_REGION="${AWS_REGION_PROD}"
     - aws sts get-caller-identity >/dev/null
   script: |
-    # 지역 설정
-    aws configure set region "$AWS_DEFAULT_REGION"
+    # ⚠️ 지역 설정 줄 제거 (AWS_DEFAULT_REGION만으로 충분)
+    # aws configure set region "$AWS_DEFAULT_REGION"
 
-    # bash로 본문 실행 (⚠️ 로컬에선 docker 금지, 전부 REMOTE로!)
+    # 전체 본문은 bash로 실행 (CI 컨테이너에서는 docker 절대 호출 X)
     bash -lc '
     set -euo pipefail
 
@@ -89,8 +89,9 @@ deploy_prod:
     COMMIT="'"$CI_COMMIT_SHA"'"
     VITE_API="${VITE_API_BASE_URL_PROD:-/api}"
 
+    # 원격에서만 실행할 스크립트
     read -r -d "" REMOTE <<EOS
-    set -eu
+    set -euxo pipefail
     CI_HOST="$CI_HOST"
     CI_PATH="$CI_PATH"
     CI_TOKEN="$CI_TOKEN"
@@ -99,7 +100,6 @@ deploy_prod:
     BE_APP="$BE_APP"
     FE_APP="$FE_APP"
 
-    # ── (원격) 네트워크: 고정 이름 사용
     NET="duckon-net"
     docker network create "\$NET" 2>/dev/null || true
 
@@ -158,7 +158,7 @@ deploy_prod:
     git remote set-url origin "https://\${CI_HOST}/\${CI_PATH}.git" || true
     EOS
 
-    # SSM 실행 (원격에서만 docker 사용)
+    # SSM: 원격에서만 docker 사용
     CMD_ID=$(aws ssm send-command \
       --instance-ids "'"$PROD_INSTANCE_ID"'" \
       --document-name "AWS-RunShellScript" \
