@@ -79,11 +79,15 @@ deploy_prod:
     - aws sts get-caller-identity
   script: |
     echo "[Build remote deployment script]"
-
-    # 1️⃣ 원격에서 실행할 스크립트를 파일로 생성
     cat > remote-script.sh <<'EOS'
     set -euxo pipefail
 
+    # 사전 진단 (문제시 바로 이유가 보이도록)
+    command -v docker || { echo "[ERROR] docker not installed"; exit 21; }
+    command -v git    || { echo "[ERROR] git not installed";    exit 22; }
+    command -v curl   || { echo "[WARN] curl missing; installing may be needed"; }
+
+    # 네트워크 선택
     NET=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{printf "%s " $k}}{{end}}' duckon-proxy 2>/dev/null | awk '{print $1}')
     [ -z "$NET" ] && NET="bridge"
     echo "Using network: $NET"
@@ -92,6 +96,14 @@ deploy_prod:
     mkdir -p "$WORKDIR"
     cd "$WORKDIR"
 
+    # 필수 env 파일 체크 (없으면 바로 이유를 보여주자)
+    if [ ! -f /srv/duckon/prod.env ]; then
+      echo "[ERROR] /srv/duckon/prod.env not found"
+      ls -l /srv/duckon || true
+      exit 23
+    fi
+
+    # 코드 동기화
     ORIGIN="https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
     if [ -d .git ]; then
       git remote set-url origin "$ORIGIN"
@@ -139,10 +151,10 @@ deploy_prod:
       [ "$code" = "200" ] || [ "$code" = "401" ] && { echo "OK ($code)"; exit 0; }
       echo "retry $i/30"; i=$((i+1)); sleep 3
     done
-    echo "healthcheck failed"; exit 1
+    echo "healthcheck failed"; exit 31
     EOS
 
-    # 2️⃣ jq로 JSON 변환해서 안전하게 전달
+    # JSON 파라미터로 안전하게 전달
     jq -n --arg script "$(cat remote-script.sh)" '{commands: [$script]}' > ssm-params.json
 
     echo "[Send command to SSM]"
@@ -153,11 +165,36 @@ deploy_prod:
       --parameters file://ssm-params.json \
       --query "Command.CommandId" \
       --output text)
-
     echo "CommandId: $CMD_ID"
 
-    echo "[Wait for execution]"
-    aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$PROD_INSTANCE_ID"
+    echo "[Poll & print logs until terminal state]"
+    # 실패여도 반드시 원격 STDOUT/STDERR를 출력
+    while :; do
+      OUT=$(aws ssm get-command-invocation \
+        --command-id "$CMD_ID" \
+        --instance-id "$PROD_INSTANCE_ID" \
+        --output json || true)
 
-    echo "[Fetch invocation log]"
-    aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$PROD_INSTANCE_ID" --output table
+      STATUS=$(echo "$OUT" | jq -r '.Status // empty')
+      STDOUT=$(echo "$OUT" | jq -r '.StandardOutputContent // ""')
+      STDERR=$(echo "$OUT" | jq -r '.StandardErrorContent // ""')
+
+      echo "SSM Status: ${STATUS:-unknown}"
+      [ -n "$STDOUT" ] && echo "----- STDOUT -----"$'\n'"$STDOUT"
+      [ -n "$STDERR" ] && echo "----- STDERR -----"$'\n'"$ERR"
+
+      case "$STATUS" in
+        Pending|InProgress|Delayed|"")
+          sleep 3
+          ;;
+        Success)
+          exit 0
+          ;;
+        Cancelled|TimedOut|Failed|Cancelling)
+          # 실패여도 마지막 로그를 보고 종료 코드 1로 명확히 실패 처리
+          echo "----- END LOGS -----"
+          echo "$OUT" | jq -r '.StandardErrorContent // ""'
+          exit 1
+          ;;
+      esac
+    done
