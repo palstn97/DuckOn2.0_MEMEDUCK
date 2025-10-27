@@ -1,0 +1,38 @@
+version: "3.9"
+
+networks:
+  duckon-net:
+
+x-health: &spring-health
+  test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
+  interval: 10s
+  timeout: 3s
+  retries: 5
+  start_period: 20s
+
+services:
+  duckon-app-dev:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: duckon-app-dev
+    env_file:
+      - /home/ubuntu/dev.env/backend.env
+    networks: [duckon-net]
+    restart: always
+    healthcheck: *spring-health
+
+  duckon-front-dev:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: duckon-front-dev
+    env_file:
+      - /home/ubuntu/dev.env/frontend.env
+    ports:
+      - "80:80"
+    depends_on:
+      duckon-app-dev:
+        condition: service_healthy
+    networks: [duckon-net]
+    restart: always
