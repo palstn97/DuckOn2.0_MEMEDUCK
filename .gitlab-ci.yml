@@ -72,6 +72,7 @@ build_frontend:
 # ───────────────────────────────────────────────────────────
 deploy_frontend_prod:
   stage: deploy
+  tags: ["duckon","dind"]
   image:
     name: amazon/aws-cli:2.17.60
     entrypoint: ["/bin/bash","-lc"]
