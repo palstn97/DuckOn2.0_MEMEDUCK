@@ -35,6 +35,8 @@ build_backend:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"'
     - if: '$CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
   image: gradle:8.6-jdk21
   variables:
     GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
@@ -52,12 +54,21 @@ build_frontend:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"'
     - if: '$CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
   image: node:20-alpine
   script:
     - cd frontend
     - npm ci
-    - VITE_API_BASE_URL="${VITE_API_BASE_URL_PROD:-/api}" npm run build
-
+    # - VITE_API_BASE_URL="${VITE_API_BASE_URL_PROD:-/api}" npm run build
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "master" ] || [ "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" = "master" ]; then
+        API_BASE="${VITE_API_BASE_URL_PROD:-/api}"
+      else
+        API_BASE="${VITE_API_BASE_URL_DEV:-/api}"
+      fi
+      echo "VITE_API_BASE_URL=$API_BASE"
+      VITE_API_BASE_URL="$API_BASE" npm run build
 # ───────────────────────────────────────────────────────────
 # PROD 배포 (SSM 원격 실행; 원격에서만 docker 사용)
 # ───────────────────────────────────────────────────────────
