@@ -50,17 +50,11 @@ build_backend:
 # ───────────────────────────────────────────────────────────
 build_frontend:
   stage: build
-  <<: *default_tags
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"'
-    - if: '$CI_COMMIT_BRANCH == "master"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"'
-    - if: '$CI_COMMIT_BRANCH == "develop"'
+  tags: ["duckon","dind"]
   image: node:20-alpine
   script:
     - cd frontend
     - npm ci
-    # - VITE_API_BASE_URL="${VITE_API_BASE_URL_PROD:-/api}" npm run build
     - |
       if [ "$CI_COMMIT_BRANCH" = "master" ] || [ "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" = "master" ]; then
         API_BASE="${VITE_API_BASE_URL_PROD:-/api}"
@@ -69,10 +63,55 @@ build_frontend:
       fi
       echo "VITE_API_BASE_URL=$API_BASE"
       VITE_API_BASE_URL="$API_BASE" npm run build
+  artifacts:
+    paths:
+      - frontend/dist
+    expire_in: 1 week
 # ───────────────────────────────────────────────────────────
-# PROD 배포 (SSM 원격 실행; 원격에서만 docker 사용)
+# PROD: 프론트 (S3+CloudFront)
 # ───────────────────────────────────────────────────────────
-deploy_prod:
+deploy_frontend_prod:
+  stage: deploy
+  tags: ["duckon","dind"]        # ← 추가
+  image:
+    name: amazon/aws-cli:2
+    entrypoint: ["/bin/bash","-lc"]
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"'
+    - when: never
+  needs: [build_frontend]
+  before_script:
+    - set -euo pipefail
+    - yum -y install jq
+    - '[ -n "$AWS_ACCESS_KEY_ID_PROD" ] || { echo "Missing AWS creds"; exit 1; }'
+    - '[ -n "$AWS_SECRET_ACCESS_KEY_PROD" ] || { echo "Missing AWS creds"; exit 1; }'
+    - '[ - n "$AWS_REGION_PROD" ] || { echo "Missing region"; exit 1; }'
+    - '[ -n "$S3_BUCKET_FE_PROD" ] || { echo "Missing S3 bucket"; exit 1; }'
+    - '[ -n "$CF_DISTRIBUTION_ID_PROD" ] || { echo "Missing CF dist id"; exit 1; }'
+    - export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID_PROD"
+    - export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY_PROD"
+    - export AWS_DEFAULT_REGION="$AWS_REGION_PROD"
+  script: |
+    cd frontend/dist
+    # 1) 에셋(HTML 제외) - 1년 캐시/immutable
+    aws s3 cp . "s3://$S3_BUCKET_FE_PROD" --recursive \
+      --exclude "*.html" \
+      --cache-control "public,max-age=31536000,immutable"
+    # 2) HTML - no-cache
+    find . -name "*.html" -print0 | while IFS= read -r -d '' f; do
+      aws s3 cp "$f" "s3://$S3_BUCKET_FE_PROD/${f#./}" \
+        --cache-control "no-cache" \
+        --content-type "text/html; charset=utf-8"
+    done
+    # 3) CloudFront 무효화
+    aws cloudfront create-invalidation \
+      --distribution-id "$CF_DISTRIBUTION_ID_PROD" \
+      --paths "/index.html" "/"
+
+# ───────────────────────────────────────────────────────────
+# PROD: 백엔드 (SSM)
+# ───────────────────────────────────────────────────────────
+deploy_backend_prod:
   stage: deploy
   tags: ["duckon","dind"]
   image:
@@ -81,15 +120,14 @@ deploy_prod:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"'
     - when: never
-  needs: [build_backend, build_frontend]
+  needs: [build_backend]          # ← 핵심 수정
   before_script:
     - set -eo pipefail
     - yum -y install jq bash
-    # 변수 검증
-    - '[ -n "$AWS_ACCESS_KEY_ID_PROD" ] || { echo "Missing CI var: AWS_ACCESS_KEY_ID_PROD"; exit 1; }'
-    - '[ -n "$AWS_SECRET_ACCESS_KEY_PROD" ] || { echo "Missing CI var: AWS_SECRET_ACCESS_KEY_PROD"; exit 1; }'
-    - '[ -n "$AWS_REGION_PROD" ] || { echo "Missing CI var: AWS_REGION_PROD"; exit 1; }'
-    # AWS 인증
+    - '[ -n "$AWS_ACCESS_KEY_ID_PROD" ] || { echo "Missing: AWS_ACCESS_KEY_ID_PROD"; exit 1; }'
+    - '[ -n "$AWS_SECRET_ACCESS_KEY_PROD" ] || { echo "Missing: AWS_SECRET_ACCESS_KEY_PROD"; exit 1; }'
+    - '[ -n "$AWS_REGION_PROD" ] || { echo "Missing: AWS_REGION_PROD"; exit 1; }'
+    - '[ -n "$PROD_INSTANCE_ID" ] || { echo "Missing: PROD_INSTANCE_ID"; exit 1; }'   # ← 추가
     - export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID_PROD"
     - export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY_PROD"
     - export AWS_DEFAULT_REGION="$AWS_REGION_PROD"
@@ -118,8 +156,6 @@ deploy_prod:
     ORIGIN="https://gitlab-ci-token:__CI_JOB_TOKEN__@__CI_SERVER_HOST__/__CI_PROJECT_PATH__.git"
     COMMIT="__CI_COMMIT_SHA__"
     BE_APP="__BE_APP__"
-    FE_APP="__FE_APP__"
-    VITE_API="__VITE_API_BASE_URL_PROD__"
 
     if [ -d .git ]; then
       git remote set-url origin "$ORIGIN"
@@ -131,7 +167,6 @@ deploy_prod:
     fi
     git reset --hard "$COMMIT"
     echo "[git] HEAD=$(git rev-parse --short HEAD)"
-    git remote -v
 
     ENV_FILE="/srv/duckon/compose/prod.env"
     [ -f "$ENV_FILE" ] || { echo "[ERROR] $ENV_FILE not found"; exit 23; }
@@ -146,21 +181,6 @@ deploy_prod:
       -e JAVA_OPTS="-Xms256m -Xmx512m" \
       --restart unless-stopped \
       duckonback:prod
-
-    echo "[FE] build (cache-bust) & restart"
-    docker build \
-      --pull --no-cache \
-      --build-arg NGINX_CONF=nginx.prod.conf \
-      --build-arg VITE_API_BASE_URL="${VITE_API:-/api}" \
-      --build-arg BUILD_NOCACHE="$(date +%s)" \
-      -t duckon-front:prod \
-      -f frontend/Dockerfile frontend
-
-    docker rm -f "$FE_APP" 2>/dev/null || true
-    docker run -d --name "$FE_APP" \
-      --network "$NET" \
-      --restart unless-stopped \
-      duckon-front:prod
 
     docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
 
@@ -180,8 +200,6 @@ deploy_prod:
       -e "s|__CI_PROJECT_PATH__|$CI_PROJECT_PATH|g" \
       -e "s|__CI_COMMIT_SHA__|$CI_COMMIT_SHA|g" \
       -e "s|__BE_APP__|$BE_APP|g" \
-      -e "s|__FE_APP__|$FE_APP|g" \
-      -e "s|__VITE_API_BASE_URL_PROD__|${VITE_API_BASE_URL_PROD:-/api}|g" \
       remote.sh
 
     jq -n --arg script "$(cat remote.sh)" '{commands: [$script]}' > ssm-params.json
@@ -206,7 +224,7 @@ deploy_prod:
       echo "----- STDERR -----"; echo "$OUT" | jq -r '.StandardErrorContent // ""'
       [ "$STATUS" = "Success" ] && exit 0 || exit 1
     done
-
+    
 # ───────────────────────────────────────────────────────────
 # DEV 배포 (SSH/PEM)
 # ───────────────────────────────────────────────────────────
