@@ -1,13 +1,19 @@
 import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Tv, HelpCircle } from "lucide-react";
-import ArtistCard from "../components/domain/artist/ArtistCard";
 import { getRandomArtists } from "../api/artistService";
 import { type Artist } from "../types/artist";
 import { useTrendingRooms } from "../hooks/useTrendingRooms";
 import ArtistCardSkeleton from "../components/domain/artist/ArtistCartdSekeleton";
 import GuideModal, { type GuideStep } from "../components/common/modal/GuideModal";
 import { createSlug } from "../utils/slugUtils";
+import { 
+  Style3DTilt,
+  StyleCarousel,
+  StyleHoverExpand,
+  StyleWave,
+  StyleBento
+} from "../components/domain/artist/ArtistStyles";
 
 const HomePage = () => {
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
@@ -16,6 +22,9 @@ const HomePage = () => {
   const [guideOpen, setGuideOpen] = useState(false);
   const [guideIndex, setGuideIndex] = useState(0);
   const [expandedRoomIndex, setExpandedRoomIndex] = useState(0);
+  const [artistCarouselIndex, setArtistCarouselIndex] = useState(0);
+  const [hoveredArtistIndex, setHoveredArtistIndex] = useState<number | null>(null);
+  const [artistStyleIndex, setArtistStyleIndex] = useState(0); // 0~4: 5가지 스타일
   const navigate = useNavigate();
 
   const {
@@ -121,6 +130,20 @@ const HomePage = () => {
     
     return () => clearInterval(interval);
   }, [banners.length]);
+
+  // 아티스트 캐러셀 자동 스크롤
+  useEffect(() => {
+    if (recommendedArtists.length === 0) return;
+    
+    const interval = setInterval(() => {
+      setArtistCarouselIndex((prev) => {
+        const maxIndex = Math.max(0, recommendedArtists.length - 3);
+        return prev >= maxIndex ? 0 : prev + 1;
+      });
+    }, 3000);
+    
+    return () => clearInterval(interval);
+  }, [recommendedArtists.length]);
 
   useEffect(() => {
     const fetchRandomArtists = async () => {
@@ -398,34 +421,99 @@ const HomePage = () => {
           )}
         </section>
 
-        {/* 주목해야 할 아티스트 섹션 */}
-        <section>
-          <div className="flex justify-between items-center mb-8">
-            <h2 className="text-2xl md:text-3xl font-bold">
-              주목해야 할 아티스트!
-            </h2>
-            <Link
-              to="/artist-list"
-              className="text-purple-600 hover:text-purple-800 font-semibold transition-colors"
-            >
-              더보기 →
-            </Link>
+        {/* 주목해야 할 아티스트 섹션 - 다양한 스타일 */}
+        <section className="relative">
+          <div className="flex flex-col gap-4 mb-8">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+                  ✨ 주목해야 할 아티스트!
+                </h2>
+                <p className="text-gray-500 text-sm mt-1">지금 가장 핫한 아티스트들을 만나보세요</p>
+              </div>
+              <Link
+                to="/artist-list"
+                className="text-purple-600 hover:text-purple-800 font-semibold transition-colors flex items-center gap-1 group"
+              >
+                전체 보기
+                <ChevronRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
+              </Link>
+            </div>
+            
+            {/* 스타일 선택 버튼 */}
+            <div className="flex gap-2 flex-wrap">
+              {['3D 틸트', '캐러셀', '호버 확장', '파도 효과', 'Bento 그리드'].map((style, index) => (
+                <button
+                  key={index}
+                  onClick={() => setArtistStyleIndex(index)}
+                  className={`px-4 py-2 rounded-full text-sm font-semibold transition-all ${
+                    artistStyleIndex === index
+                      ? 'bg-purple-600 text-white shadow-lg'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  스타일 {index + 1}: {style}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex flex-wrap justify-center gap-4">
-            {isLoadingArtists
-              ? Array.from({ length: 5 }).map((_, i) => (
-                  <ArtistCardSkeleton key={i} />
-                ))
-              : recommendedArtists.map((artist) => (
-                  <ArtistCard
-                    key={artist.artistId}
-                    {...artist}
-                    onClick={() =>
-                      handleCardClick(artist.artistId, artist.nameEn)
-                    }
-                  />
-                ))}
-          </div>
+
+          {isLoadingArtists ? (
+            <div className="flex gap-6 justify-center">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <ArtistCardSkeleton key={i} />
+              ))}
+            </div>
+          ) : (
+            <>
+              {artistStyleIndex === 0 && (
+                <Style3DTilt
+                  artists={recommendedArtists}
+                  hoveredIndex={hoveredArtistIndex}
+                  setHoveredIndex={setHoveredArtistIndex}
+                  onCardClick={handleCardClick}
+                />
+              )}
+              
+              {artistStyleIndex === 1 && (
+                <StyleCarousel
+                  artists={recommendedArtists}
+                  hoveredIndex={hoveredArtistIndex}
+                  setHoveredIndex={setHoveredArtistIndex}
+                  onCardClick={handleCardClick}
+                  carouselIndex={artistCarouselIndex}
+                  setCarouselIndex={setArtistCarouselIndex}
+                />
+              )}
+              
+              {artistStyleIndex === 2 && (
+                <StyleHoverExpand
+                  artists={recommendedArtists}
+                  hoveredIndex={hoveredArtistIndex}
+                  setHoveredIndex={setHoveredArtistIndex}
+                  onCardClick={handleCardClick}
+                />
+              )}
+              
+              {artistStyleIndex === 3 && (
+                <StyleWave
+                  artists={recommendedArtists}
+                  hoveredIndex={hoveredArtistIndex}
+                  setHoveredIndex={setHoveredArtistIndex}
+                  onCardClick={handleCardClick}
+                />
+              )}
+              
+              {artistStyleIndex === 4 && (
+                <StyleBento
+                  artists={recommendedArtists}
+                  hoveredIndex={hoveredArtistIndex}
+                  setHoveredIndex={setHoveredArtistIndex}
+                  onCardClick={handleCardClick}
+                />
+              )}
+            </>
+          )}
         </section>
 
         {/* 빠르게 시작하기 섹션 */}
