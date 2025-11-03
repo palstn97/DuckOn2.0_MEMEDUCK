@@ -1,31 +1,65 @@
 import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Tv, HelpCircle } from "lucide-react";
+import ArtistCard from "../components/domain/artist/ArtistCard";
+import ArtistLiveSection from "../components/domain/artist/ArtistLiveSection";
 import { getRandomArtists } from "../api/artistService";
 import { type Artist } from "../types/artist";
+import { type ArtistLiveData } from "../types/live";
 import { useTrendingRooms } from "../hooks/useTrendingRooms";
 import ArtistCardSkeleton from "../components/domain/artist/ArtistCartdSekeleton";
 import GuideModal, { type GuideStep } from "../components/common/modal/GuideModal";
 import { createSlug } from "../utils/slugUtils";
-import { 
-  Style3DTilt,
-  StyleCarousel,
-  StyleHoverExpand,
-  StyleWave,
-  StyleBento
-} from "../components/domain/artist/ArtistStyles";
 
 const HomePage = () => {
   const [currentBannerIndex, setCurrentBannerIndex] = useState(0);
   const [recommendedArtists, setRecommendedArtists] = useState<Artist[]>([]);
   const [isLoadingArtists, setIsLoadingArtists] = useState(true);
+  const [artistLiveDataList, setArtistLiveDataList] = useState<ArtistLiveData[]>([]);
+  const [isLoadingLiveData, setIsLoadingLiveData] = useState(true);
   const [guideOpen, setGuideOpen] = useState(false);
   const [guideIndex, setGuideIndex] = useState(0);
   const [expandedRoomIndex, setExpandedRoomIndex] = useState(0);
-  const [artistCarouselIndex, setArtistCarouselIndex] = useState(0);
-  const [hoveredArtistIndex, setHoveredArtistIndex] = useState<number | null>(null);
-  const [artistStyleIndex, setArtistStyleIndex] = useState(0); // 0~4: 5가지 스타일
   const navigate = useNavigate();
+
+  // 더미 데이터: 방송 목록 (아티스트별로 매핑할 예정)
+  const dummyLiveRooms = [
+    {
+      roomId: 101,
+      title: "좋은 날 같이 들어요",
+      thumbnailUrl: "https://placehold.co/640x360?text=Live+1&font=roboto",
+      viewerCount: 1234,
+      hostNickname: "팬123",
+    },
+    {
+      roomId: 102,
+      title: "뮤비 감상회",
+      thumbnailUrl: "https://placehold.co/640x360?text=Live+2&font=roboto",
+      viewerCount: 856,
+      hostNickname: "팬456",
+    },
+    {
+      roomId: 103,
+      title: "콘서트 다시보기",
+      thumbnailUrl: "https://placehold.co/640x360?text=Live+3&font=roboto",
+      viewerCount: 2341,
+      hostNickname: "팬789",
+    },
+    {
+      roomId: 104,
+      title: "노래 무한반복",
+      thumbnailUrl: "https://placehold.co/640x360?text=Live+4&font=roboto",
+      viewerCount: 645,
+      hostNickname: "팬ABC",
+    },
+    {
+      roomId: 105,
+      title: "팬들과 함께하는 시간",
+      thumbnailUrl: "https://placehold.co/640x360?text=Live+5&font=roboto",
+      viewerCount: 1890,
+      hostNickname: "팬DEF",
+    },
+  ];
 
   const {
     data: trendingRooms,
@@ -131,20 +165,52 @@ const HomePage = () => {
     return () => clearInterval(interval);
   }, [banners.length]);
 
-  // 아티스트 캐러셀 자동 스크롤
+  // 아티스트 둘러보기용 아티스트 불러오기
   useEffect(() => {
-    if (recommendedArtists.length === 0) return;
-    
-    const interval = setInterval(() => {
-      setArtistCarouselIndex((prev) => {
-        const maxIndex = Math.max(0, recommendedArtists.length - 3);
-        return prev >= maxIndex ? 0 : prev + 1;
-      });
-    }, 3000);
-    
-    return () => clearInterval(interval);
-  }, [recommendedArtists.length]);
+    const fetchArtistsForLive = async () => {
+      try {
+        const data = await getRandomArtists(3); // 3명의 아티스트
+        // 각 아티스트에 더미 방송 데이터 매핑 (첫번째: 9개, 두번째: 6개, 세번째: 0개)
+        const liveData: ArtistLiveData[] = data.map((artist, index) => {
+          let rooms: typeof dummyLiveRooms = [];
+          if (index === 0) {
+            // 첫 번째 아티스트: 9개
+            rooms = Array.from({ length: 9 }, (_, i) => ({
+              ...dummyLiveRooms[i % dummyLiveRooms.length],
+              roomId: artist.artistId * 100 + i + 1,
+              title: `${dummyLiveRooms[i % dummyLiveRooms.length].title} ${i + 1}`,
+            }));
+          } else if (index === 1) {
+            // 두 번째 아티스트: 6개
+            rooms = Array.from({ length: 6 }, (_, i) => ({
+              ...dummyLiveRooms[i % dummyLiveRooms.length],
+              roomId: artist.artistId * 100 + i + 1,
+              title: `${dummyLiveRooms[i % dummyLiveRooms.length].title} ${i + 1}`,
+            }));
+          }
+          // 세 번째 아티스트: 0개 (빈 배열)
+          
+          return {
+            artistId: artist.artistId,
+            nameKr: artist.nameKr,
+            nameEn: artist.nameEn,
+            imgUrl: artist.imgUrl,
+            followerCount: 0, // API에서 followerCount가 없으면 0으로
+            liveRooms: rooms,
+          };
+        });
+        setArtistLiveDataList(liveData);
+      } catch (error) {
+        console.error("아티스트를 불러오는 데 실패했습니다.", error);
+        setArtistLiveDataList([]);
+      } finally {
+        setIsLoadingLiveData(false);
+      }
+    };
+    fetchArtistsForLive();
+  }, []);
 
+  // 추천 아티스트 불러오기
   useEffect(() => {
     const fetchRandomArtists = async () => {
       try {
@@ -421,99 +487,78 @@ const HomePage = () => {
           )}
         </section>
 
-        {/* 주목해야 할 아티스트 섹션 - 다양한 스타일 */}
-        <section className="relative">
-          <div className="flex flex-col gap-4 mb-8">
-            <div className="flex justify-between items-center">
-              <div>
-                <h2 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
-                  ✨ 주목해야 할 아티스트!
-                </h2>
-                <p className="text-gray-500 text-sm mt-1">지금 가장 핫한 아티스트들을 만나보세요</p>
-              </div>
-              <Link
-                to="/artist-list"
-                className="text-purple-600 hover:text-purple-800 font-semibold transition-colors flex items-center gap-1 group"
-              >
-                전체 보기
-                <ChevronRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
-              </Link>
-            </div>
-            
-            {/* 스타일 선택 버튼 */}
-            <div className="flex gap-2 flex-wrap">
-              {['3D 틸트', '캐러셀', '호버 확장', '파도 효과', 'Bento 그리드'].map((style, index) => (
-                <button
-                  key={index}
-                  onClick={() => setArtistStyleIndex(index)}
-                  className={`px-4 py-2 rounded-full text-sm font-semibold transition-all ${
-                    artistStyleIndex === index
-                      ? 'bg-purple-600 text-white shadow-lg'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                >
-                  스타일 {index + 1}: {style}
-                </button>
+        {/* 아티스트 둘러보기 섹션 */}
+        <section>
+          <div className="flex justify-between items-center mb-8">
+            <h2 className="text-2xl md:text-3xl font-bold">
+              아티스트 둘러보기
+            </h2>
+            <Link
+              to="/artist-list"
+              className="text-purple-600 hover:text-purple-800 font-semibold transition-colors"
+            >
+              전체 보기 →
+            </Link>
+          </div>
+          {isLoadingLiveData ? (
+            <div className="space-y-10">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex gap-6">
+                  <div className="flex-shrink-0 w-[160px] h-[240px] bg-gray-200 rounded-2xl animate-pulse" />
+                  <div className="flex-1 flex gap-4">
+                    {Array.from({ length: 4 }).map((_, j) => (
+                      <div key={j} className="w-[280px] h-[200px] bg-gray-200 rounded-xl animate-pulse" />
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
-          </div>
-
-          {isLoadingArtists ? (
-            <div className="flex gap-6 justify-center">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <ArtistCardSkeleton key={i} />
+          ) : artistLiveDataList.length > 0 ? (
+            <div className="space-y-4">
+              {artistLiveDataList.map((artistLive) => (
+                <ArtistLiveSection
+                  key={artistLive.artistId}
+                  artistLive={artistLive}
+                />
               ))}
             </div>
           ) : (
-            <>
-              {artistStyleIndex === 0 && (
-                <Style3DTilt
-                  artists={recommendedArtists}
-                  hoveredIndex={hoveredArtistIndex}
-                  setHoveredIndex={setHoveredArtistIndex}
-                  onCardClick={handleCardClick}
-                />
-              )}
-              
-              {artistStyleIndex === 1 && (
-                <StyleCarousel
-                  artists={recommendedArtists}
-                  hoveredIndex={hoveredArtistIndex}
-                  setHoveredIndex={setHoveredArtistIndex}
-                  onCardClick={handleCardClick}
-                  carouselIndex={artistCarouselIndex}
-                  setCarouselIndex={setArtistCarouselIndex}
-                />
-              )}
-              
-              {artistStyleIndex === 2 && (
-                <StyleHoverExpand
-                  artists={recommendedArtists}
-                  hoveredIndex={hoveredArtistIndex}
-                  setHoveredIndex={setHoveredArtistIndex}
-                  onCardClick={handleCardClick}
-                />
-              )}
-              
-              {artistStyleIndex === 3 && (
-                <StyleWave
-                  artists={recommendedArtists}
-                  hoveredIndex={hoveredArtistIndex}
-                  setHoveredIndex={setHoveredArtistIndex}
-                  onCardClick={handleCardClick}
-                />
-              )}
-              
-              {artistStyleIndex === 4 && (
-                <StyleBento
-                  artists={recommendedArtists}
-                  hoveredIndex={hoveredArtistIndex}
-                  setHoveredIndex={setHoveredArtistIndex}
-                  onCardClick={handleCardClick}
-                />
-              )}
-            </>
+            <div className="w-full flex flex-col items-center justify-center text-center text-gray-500 py-20 bg-gray-100 rounded-2xl">
+              <p className="font-semibold text-gray-600">
+                아티스트 정보를 불러올 수 없습니다.
+              </p>
+            </div>
           )}
+        </section>
+
+        {/* 주목해야 할 아티스트 섹션 */}
+        <section>
+          <div className="flex justify-between items-center mb-8">
+            <h2 className="text-2xl md:text-3xl font-bold">
+              주목해야 할 아티스트!
+            </h2>
+            <Link
+              to="/artist-list"
+              className="text-purple-600 hover:text-purple-800 font-semibold transition-colors"
+            >
+              더보기 →
+            </Link>
+          </div>
+          <div className="flex flex-wrap justify-center gap-4">
+            {isLoadingArtists
+              ? Array.from({ length: 5 }).map((_, i) => (
+                  <ArtistCardSkeleton key={i} />
+                ))
+              : recommendedArtists.map((artist) => (
+                  <ArtistCard
+                    key={artist.artistId}
+                    {...artist}
+                    onClick={() =>
+                      handleCardClick(artist.artistId, artist.nameEn)
+                    }
+                  />
+                ))}
+          </div>
         </section>
 
         {/* 빠르게 시작하기 섹션 */}
