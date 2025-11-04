@@ -683,27 +683,19 @@
 
 
 import { useState, useEffect, useRef } from "react";
-import {
-  Send,
-  MoreVertical,
-  UserX,
-  // LockKeyhole,
-  // Languages,
-} from "lucide-react";
+import { Send, MoreVertical, UserX } from "lucide-react";
 import { Popover, Transition } from "@headlessui/react";
 import { useUserStore } from "../../store/useUserStore";
 import type { ChatMessage } from "../../types/chat";
-// import { translateMessage } from "../../api/translateService";
 import { blockUser } from "../../api/userService";
 
-// --- 부모로부터 받아야 할 Props 타입 정의 ---
 type ChatPanelProps = {
   messages: ChatMessage[];
-  sendMessage: (content: string) => void;
+  sendMessage: (content: string) => Promise<void> | void;
   onBlockUser: (userId: string) => void;
 };
 
-// 최근 메시지/이름 미리보기: 그래펨 기준 limit, 초과 시 …
+// 최근 메시지/이름 미리보기
 function previewGraphemes(s: string, limit: number): string {
   if (!s) return "";
   // @ts-ignore
@@ -713,11 +705,9 @@ function previewGraphemes(s: string, limit: number): string {
     const parts = Array.from(seg.segment(s)).map((p: any) => p.segment);
     return parts.length > limit ? parts.slice(0, limit).join("") + "…" : s;
   }
-  // 폴백: 코드포인트 기준
   return s.length > limit ? s.slice(0, limit) + "…" : s;
 }
 
-// 유니코드 안전 글자수(그래펨 단위) 계산 (입력 제한용)
 function countGraphemes(s: string): number {
   if (!s) return 0;
   // @ts-ignore
@@ -730,8 +720,9 @@ function countGraphemes(s: string): number {
 }
 
 const MAX_LEN = 500;
+const SCROLL_CLASS = "duckon-chat-scroll"; // 👈 이 컴포넌트 전용 스크롤 클래스
 
-// --- 차단 확인 모달 컴포넌트 ---
+// --- 차단 확인 모달 ---
 const ConfirmModal = ({
   isOpen,
   onConfirm,
@@ -787,23 +778,30 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
 
   const [lastUnread, setLastUnread] = useState<ChatMessage | null>(null);
 
-  // 차단 확인 모달 상태
+  // 차단 확인 모달
   const [blockConfirm, setBlockConfirm] = useState<{
     isOpen: boolean;
     user: { id: string; nickname: string } | null;
   }>({ isOpen: false, user: null });
 
-  // ✅ 렌더에 반영되는 '바닥 여부'
   const [atBottom, setAtBottom] = useState(true);
-
-  // ✅ 입력 영역 높이 측정(겹침 방지용)
   const footerRef = useRef<HTMLDivElement | null>(null);
   const [footerH, setFooterH] = useState(0);
-
-  // ✅ 한 줄/멀티라인 판단용
   const [isMultiline, setIsMultiline] = useState(false);
 
-  // 입력영역 높이 자동 추적
+  // ✅ 도배 감지용
+  const [rateLimitedUntil, setRateLimitedUntil] = useState<number | null>(null);
+  const pendingSendRef = useRef<{
+    content: string;
+    at: number;
+    msgCount: number;
+    self: boolean;
+  } | null>(null);
+  const lastMsgCountRef = useRef<number>(messages.length);
+
+  const isLoggedIn = !!myUser?.userId;
+
+  // footer 높이 추적
   useEffect(() => {
     const el = footerRef.current;
     if (!el) return;
@@ -826,7 +824,6 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
   const onScroll = () => {
     const el = listRef.current;
     if (!el) return;
-
     const atBottomNow = calcIsAtBottom(el);
     isAtBottomRef.current = atBottomNow;
     setAtBottom(atBottomNow);
@@ -836,13 +833,12 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
     }
   };
 
+  // 메시지 들어올 때 처리
   useEffect(() => {
     const addedCount = messages.length - prevLenRef.current;
 
     if (addedCount > 0) {
       const last = messages[messages.length - 1];
-
-      // ✅ 시스템 메시지(ENTER)만 제외
       const isSystem = (last as any)?.chatType === "ENTER";
       if (!last || isSystem) {
         prevLenRef.current = messages.length;
@@ -852,7 +848,6 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
       const fromMe =
         String(last?.senderId ?? "") === String(myUser?.userId ?? "");
 
-      // DOM 업데이트를 확실하게 기다림
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           const el = listRef.current;
@@ -873,29 +868,26 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
     }
 
     prevLenRef.current = messages.length;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length, myUser?.userId]);
 
+  // 첫 로드시 맨 아래로
   useEffect(() => {
     setTimeout(() => {
       scrollToBottom("auto");
       setAtBottom(true);
       isAtBottomRef.current = true;
     }, 100);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ textarea 자동 리사이즈 (최대 높이 제한) + 멀티라인 판정
+  // textarea 자동 리사이즈
   const autoResize = () => {
     const el = inputRef.current;
     if (!el) return;
-    const MAX_H = 160; // px
+    const MAX_H = 160;
     el.style.height = "auto";
     const h = Math.min(el.scrollHeight, MAX_H);
     el.style.height = `${h}px`;
     el.style.overflowY = el.scrollHeight > MAX_H ? "auto" : "hidden";
-
-    // 한 줄 기준 높이(대략 48px) 이상이면 멀티라인으로 판단
     setIsMultiline(h > 48);
   };
 
@@ -903,16 +895,61 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
     autoResize();
   }, [newMessage]);
 
+  // ✅ 메시지 수신 시 pending 해제 (로그인/게스트 공통)
+  useEffect(() => {
+    const pending = pendingSendRef.current;
+
+    if (pending) {
+      const last = messages[messages.length - 1];
+
+      if (
+        pending.self &&
+        last &&
+        myUser?.userId &&
+        String(last.senderId) === String(myUser.userId) &&
+        last.content === pending.content
+      ) {
+        pendingSendRef.current = null;
+      } else if (messages.length > pending.msgCount) {
+        pendingSendRef.current = null;
+      }
+    }
+
+    lastMsgCountRef.current = messages.length;
+  }, [messages, myUser?.userId]);
+
+  // ✅ 배너 띄우는 공통 함수
+  const triggerRateLimited = (ms = 5000) => {
+    const now = Date.now();
+    setRateLimitedUntil(now + ms);
+  };
+
   const handleSendMessage = () => {
     const v = newMessage.trim();
     if (!v) return;
-    if (countGraphemes(newMessage) > MAX_LEN) return; // ✅ 100자 제한
+    if (countGraphemes(newMessage) > MAX_LEN) return;
 
-    // 전송(텍스트/URL 모두 동일하게 위임) — isImage 여부는 상위 전송 로직에서 판단
-    sendMessage(v);
+    const now = Date.now();
+    const isRateLimitedNow =
+      rateLimitedUntil !== null && now < rateLimitedUntil;
+
+    if (isRateLimitedNow) {
+      triggerRateLimited();
+      return;
+    }
+
+    const sentAt = Date.now();
+
+    pendingSendRef.current = {
+      content: v,
+      at: sentAt,
+      msgCount: messages.length,
+      self: isLoggedIn,
+    };
+
+    const maybePromise = sendMessage(v);
     setNewMessage("");
 
-    // 전송 직후 다시 포커스
     requestAnimationFrame(() => {
       scrollToBottom("auto");
       setAtBottom(true);
@@ -924,9 +961,30 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
         el.focus({ preventScroll: true });
       }
     });
+
+    Promise.resolve(maybePromise).catch((err) => {
+      const type =
+        (err as any)?.response?.data?.type || (err as any)?.type || "";
+      if (type === "CHAT_RATE_LIMITED" || (err as any)?.status === 429) {
+        triggerRateLimited();
+        pendingSendRef.current = null;
+      }
+    });
+
+    setTimeout(() => {
+      const pendingNow = pendingSendRef.current;
+      if (!pendingNow) return;
+      if (
+        pendingNow.at === sentAt &&
+        lastMsgCountRef.current === pendingNow.msgCount
+      ) {
+        triggerRateLimited();
+        pendingSendRef.current = null;
+      }
+    }, 200);
   };
 
-  // 차단 확인 모달 열기
+  // 차단 모달 열기
   const openBlockConfirm = (user: { id: string; nickname: string }) => {
     setBlockConfirm({ isOpen: true, user });
   };
@@ -950,12 +1008,14 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
   const charCount = countGraphemes(newMessage);
   const overLimit = charCount > MAX_LEN;
 
-  // ✅ 배지에 들어갈 미리보기(이미지면 [GIF]로 표시)
   const previewContent = (m: ChatMessage | null) => {
     if (!m) return "";
     if ((m as any).isImage) return "[GIF]";
     return previewGraphemes(m.content ?? "", 10);
   };
+
+  const isRateLimitedNow =
+    rateLimitedUntil !== null && Date.now() < rateLimitedUntil;
 
   return (
     <>
@@ -966,13 +1026,27 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
         nickname={blockConfirm.user?.nickname ?? ""}
       />
 
-      {/* ✅ 배지 위치를 위해 relative로 감싼다 */}
       <div className="relative flex flex-col h-full bg-gray-800 text-white">
+        {/* ✅ 도배 안내 말풍선 */}
+        {isRateLimitedNow && (
+          <div
+            className="absolute left-1/2 -translate-x-1/2 z-[300] transition-opacity"
+            style={{
+              bottom: (footerH || 88) + 12,
+              maxWidth: "92%",
+            }}
+          >
+            <div className="bg-red-500 text-white text-sm md:text-base px-5 py-2 rounded-2xl shadow-lg border border-red-300 flex items-center gap-2 whitespace-nowrap justify-center">
+              ⚠️ 채팅 도배로 5초간 채팅이 제한됩니다.
+            </div>
+          </div>
+        )}
+
         {/* 메시지 목록 */}
         <div
           ref={listRef}
           onScroll={onScroll}
-          className="flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 min-h-0"
+          className={`flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 min-h-0 ${SCROLL_CLASS}`}
           style={{
             paddingBottom: 8,
             scrollPaddingBottom: (footerH || 88) + 8,
@@ -1011,9 +1085,7 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
                     isMyMessage ? "flex-row-reverse" : "flex-row"
                   }`}
                 >
-                  {/* === 말풍선 / 이미지 분기 === */}
                   {(msg as any).isImage ? (
-                    // 이미지/GIF 렌더
                     <div className="relative">
                       <img
                         src={msg.content}
@@ -1028,10 +1100,10 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
                         loading="lazy"
                         onLoad={() => scrollToBottom("auto")}
                         onError={(e) => {
-                          (e.currentTarget as HTMLImageElement).style.display = "none";
+                          (e.currentTarget as HTMLImageElement).style.display =
+                            "none";
                         }}
                       />
-                      {/* 상대 메시지 옵션(이미지에도 노출) */}
                       {!isMyMessage && (
                         <Popover className="absolute top-1 right-1">
                           <Popover.Button className="p-0.5 rounded-full bg-black/30 hover:bg-black/50 focus:outline-none">
@@ -1068,7 +1140,6 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
                       )}
                     </div>
                   ) : (
-                    // 텍스트 말풍선 (기존 유지)
                     <div
                       className={`relative group px-4 py-2 rounded-lg text-sm ${
                         isMyMessage ? "bg-purple-600" : "bg-gray-700"
@@ -1078,7 +1149,6 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
                         {msg.content}
                       </span>
 
-                      {/* 상대 메시지 옵션 */}
                       {!isMyMessage && (
                         <Popover className="absolute top-1 right-1">
                           <Popover.Button className="p-0.5 rounded-full hover:bg-black/20 focus:outline-none">
@@ -1116,7 +1186,6 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
                     </div>
                   )}
 
-                  {/* 타임스탬프 */}
                   <span className="text-xs text-gray-500 whitespace-nowrap">
                     {new Date((msg as any).sentAt).toLocaleTimeString("ko-KR", {
                       hour: "2-digit",
@@ -1128,14 +1197,13 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
             );
           })}
 
-          {/* 스크롤 앵커 */}
           <div
             ref={messagesEndRef}
             style={{ scrollMarginBottom: (footerH || 88) + 8 }}
           />
         </div>
 
-        {/* ✅ '새 메시지' 배지 */}
+        {/* 새 메시지 배지 */}
         {lastUnread && !atBottom && (
           <div
             onClick={() => {
@@ -1150,7 +1218,6 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
               paddingBottom: "env(safe-area-inset-bottom)",
             }}
           >
-            {/* 중간 점(·) 제거된 형태 유지 */}
             <div className="bg-white border border-gray-200 rounded-2xl shadow-xl px-3 py-2">
               <div className="flex items-center gap-2 max-w-[280px]">
                 <span className="text-gray-900 text-sm font-semibold shrink-0">
@@ -1164,18 +1231,24 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
           </div>
         )}
 
-        {/* 메시지 입력 영역 */}
+        {/* 입력 영역 */}
         <div
           ref={footerRef}
           className="p-3 border-t border-gray-700 bg-gray-800/80"
         >
-          {/* ← 이 div가 ‘입력창’의 테두리/배경/포커스링을 담당 */}
           <div
             className={`rounded-lg border bg-gray-700 transition-colors
-                        ${overLimit ? "border-red-500" : "border-gray-600 focus-within:border-purple-500"}`}
+                        ${
+                          overLimit
+                            ? "border-red-500"
+                            : "border-gray-600 focus-within:border-purple-500"
+                        } ${isRateLimitedNow ? "opacity-70" : ""}`}
           >
-            <div className={`flex ${isMultiline ? "items-end" : "items-center"} gap-2 px-3 py-2`}>
-              {/* textarea는 투명/무테로, 공간은 flex-1로 확장 */}
+            <div
+              className={`flex ${
+                isMultiline ? "items-end" : "items-center"
+              } gap-2 px-3 py-2`}
+            >
               <textarea
                 ref={inputRef}
                 rows={1}
@@ -1184,29 +1257,48 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
                 onInput={autoResize}
                 onKeyDown={(e) => {
                   // @ts-ignore
-                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent?.isComposing) {
+                  if (
+                    e.key === "Enter" &&
+                    !e.shiftKey &&
+                    !e.nativeEvent?.isComposing
+                  ) {
                     e.preventDefault();
                     if (!overLimit) handleSendMessage();
                   }
                 }}
-                placeholder={myUser ? "메시지를 입력하세요..." : "게스트로 채팅하기..."}
+                placeholder={
+                  isRateLimitedNow
+                    ? "채팅 도배로 잠시 제한되었습니다."
+                    : myUser
+                    ? "메시지를 입력하세요..."
+                    : "게스트로 채팅하기..."
+                }
                 className="flex-1 bg-transparent border-0 outline-none resize-none max-h-40
                           text-base md:text-sm leading-6 placeholder:text-gray-400
                           focus:ring-0 p-0"
+                disabled={isRateLimitedNow}
               />
 
-              {/* ✅ ‘입력창 내부’ 우측 끝에 붙는 버튼 */}
               <button
                 type="button"
                 tabIndex={-1}
-                onPointerDown={(e) => { e.preventDefault(); }}
-                onPointerUp={(e) => { e.preventDefault(); sentByPointerRef.current = true; if (!overLimit) handleSendMessage(); }}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                }}
+                onPointerUp={(e) => {
+                  e.preventDefault();
+                  sentByPointerRef.current = true;
+                  if (!overLimit) handleSendMessage();
+                }}
                 onClick={(e) => {
-                  if (sentByPointerRef.current) { sentByPointerRef.current = false; return; }
+                  if (sentByPointerRef.current) {
+                    sentByPointerRef.current = false;
+                    return;
+                  }
                   e.preventDefault();
                   if (!overLimit) handleSendMessage();
                 }}
-                disabled={!newMessage.trim() || overLimit}
+                disabled={!newMessage.trim() || overLimit || isRateLimitedNow}
                 className="h-9 w-9 rounded-full flex items-center justify-center
                           bg-gray-600 hover:bg-gray-500 transition-colors
                           disabled:bg-gray-700 disabled:cursor-not-allowed
@@ -1218,13 +1310,41 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
             </div>
           </div>
 
-          {/* 글자수 카운터 */}
           <div className="mt-1 flex justify-end">
-            <span className={`text-xs ${overLimit ? "text-red-400" : "text-gray-400"}`}>
-              {charCount}/{MAX_LEN}{overLimit ? " (최대 초과)" : ""}
+            <span
+              className={`text-xs ${
+                overLimit ? "text-red-400" : "text-gray-400"
+              }`}
+            >
+              {charCount}/{MAX_LEN}
+              {overLimit ? " (최대 초과)" : ""}
             </span>
           </div>
         </div>
+
+        <style>{`
+          .duckon-chat-scroll {
+            /* Firefox */
+            scrollbar-width: thin;
+            scrollbar-color: rgba(148,163,184,.3) #1e293b;
+          }
+          .duckon-chat-scroll::-webkit-scrollbar {
+            width: 8px;
+          }
+          .duckon-chat-scroll::-webkit-scrollbar-track {
+            background: #1e293b; /* ✅ 채팅 영역 배경색과 동일하게 */
+            border-radius: 9999px;
+          }
+          .duckon-chat-scroll::-webkit-scrollbar-thumb {
+            background: rgba(148,163,184,.35); /* 채팅 테두리/텍스트와 조화되는 중간 톤 */
+            border-radius: 9999px;
+            transition: background 0.2s ease;
+          }
+          .duckon-chat-scroll:hover::-webkit-scrollbar-thumb {
+            background: rgba(203,213,225,.55); /* hover 시만 살짝 밝게 */
+          }
+        `}</style>
+
       </div>
     </>
   );
