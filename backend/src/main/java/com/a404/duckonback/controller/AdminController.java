@@ -2,7 +2,15 @@ package com.a404.duckonback.controller;
 
 import com.a404.duckonback.dto.AdminArtistPatchDTO;
 import com.a404.duckonback.dto.AdminArtistRequestDTO;
+import com.a404.duckonback.dto.UserRankDTO;
+import com.a404.duckonback.dto.UserRankLeaderboardDTO;
+import com.a404.duckonback.response.ApiResponseDTO;
+import com.a404.duckonback.response.SuccessCode;
 import com.a404.duckonback.service.ArtistService;
+import com.a404.duckonback.service.EngagementBatchService;
+import com.a404.duckonback.service.UserRankService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -11,8 +19,10 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
+@Tag(name = "관리자", description = "관리자 전용 API")
 @RestController
 @RequestMapping("/api/admin")
 @RequiredArgsConstructor
@@ -21,7 +31,10 @@ import java.util.Map;
 public class AdminController {
 
     private final ArtistService artistService;
+    private final UserRankService userRankService;
+    private final EngagementBatchService engagementBatchService;
 
+    @Operation(summary = "아티스트 등록", description = "새로운 아티스트를 등록합니다.")
     @PostMapping("/artists")
     public ResponseEntity<Map<String,String>> createArtist(
             @ModelAttribute @Valid AdminArtistRequestDTO dto
@@ -32,6 +45,7 @@ public class AdminController {
                 .body(Map.of("message", "아티스트가 성공적으로 등록되었습니다."));
     }
 
+    @Operation(summary = "아티스트 정보 수정", description = "기존 아티스트의 정보를 수정합니다.")
     @PatchMapping("/artists/{artistId}")
     public ResponseEntity<Map<String,String>> patchArtist(
             @PathVariable Long artistId,
@@ -39,5 +53,22 @@ public class AdminController {
     ) {
         artistService.patchArtist(artistId, dto);
         return ResponseEntity.ok(Map.of("message", "아티스트 정보가 성공적으로 수정되었습니다."));
+    }
+
+    @Operation(summary = "유저 리더보드 조회", description = "유저 참여도 지표 기반 리더보드를 조회합니다.")
+    @GetMapping("/users/leaderboard")
+    public ResponseEntity<ApiResponseDTO<List<UserRankLeaderboardDTO>>> getUserLeaderboard(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size
+    ) {
+        List<UserRankLeaderboardDTO> leaderboard = userRankService.getUserRankLeaderboard(page, size);
+        return ResponseEntity.ok(ApiResponseDTO.success(SuccessCode.ADMIN_GET_USER_LEADERBOARD_SUCCESS, leaderboard));
+    }
+
+    @Operation(summary = "유저 참여도 지표 재생성", description = "유저 참여도 지표 스냅샷을 재생성합니다.")
+    @PostMapping("/batch/engagement/rebuild")
+    public ResponseEntity<ApiResponseDTO> rebuildEngagement() {
+        engagementBatchService.rebuildEngagementSnapshot();
+        return ResponseEntity.ok(ApiResponseDTO.success(SuccessCode.ADMIN_REBUILD_ENGAGEMENT_SUCCESS));
     }
 }

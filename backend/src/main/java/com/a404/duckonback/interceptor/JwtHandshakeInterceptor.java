@@ -27,127 +27,74 @@ public class JwtHandshakeInterceptor implements HandshakeInterceptor {
     private final JWTUtil jwtUtil;
     private final UserRepository userRepository;
 
-//    @Override
-//    public boolean beforeHandshake(ServerHttpRequest request,
-//                                   ServerHttpResponse response,
-//                                   WebSocketHandler wsHandler,
-//                                   Map<String, Object> attributes) throws Exception {
-//
-//
-//        if (request instanceof ServletServerHttpRequest servletRequest) {
-//            String query = servletRequest.getServletRequest().getQueryString(); // token=...
-//            String token = null;
-//
-//            // 1. 쿼리 파라미터에서 토큰 추출
-//            if (query != null && query.contains("token=")) {
-//                token = query.replaceFirst(".*token=", "");
-//                log.debug(">> 쿼리 파라미터 token: {}", token);
-//            }
-//
-//            // 2. Authorization 헤더 fallback
-//            if (token == null) {
-//                String authHeader = servletRequest.getServletRequest().getHeader("Authorization");
-//                if (authHeader != null && authHeader.startsWith("Bearer ")) {
-//                    token = authHeader.substring(7);
-//                    log.debug(">> Authorization 헤더 token: {}", token);
-//                }
-//            }
-//
-//            // 3. 토큰 검증 및 인증 객체 생성
-//            if (token != null && jwtUtil.validateToken(token)) {
-//                Authentication authentication = jwtUtil.getAuthentication(token);
-//
-//                if (authentication != null && authentication.isAuthenticated()) {
-//                    Object principal = authentication.getPrincipal();
-//
-//                    if (principal instanceof User user) {
-//                        attributes.put("user", user);
-//                    } else if (principal instanceof UserDetails userDetails) {
-//                        // UserDetails → User로 변환
-//                        User user = userRepository.findByUserIdAndDeletedFalse(userDetails.getUsername());
-//                        attributes.put("user", user);
-//                    } else {
-//                        log.warn("알 수 없는 principal 타입: " + principal.getClass());
-//                    }
-//
-//                    return true;
-//                }
-//            } else {
-//                log.warn("유효하지 않은 JWT 토큰");
-//            }
-//        }
-//
-//        // 인증 실패
-//        log.warn("WebSocket 핸드셰이크 실패 - 401 Unauthorized");
-//        response.setStatusCode(HttpStatus.UNAUTHORIZED);
-//        return false;
-//    }
     @Override
     public boolean beforeHandshake(ServerHttpRequest request,
-                               ServerHttpResponse response,
-                               WebSocketHandler wsHandler,
-                               Map<String, Object> attributes) throws Exception {
-
+                                   ServerHttpResponse response,
+                                   WebSocketHandler wsHandler,
+                                   Map<String, Object> attributes) throws Exception {
         if (request instanceof ServletServerHttpRequest servletRequest) {
-            String query = servletRequest.getServletRequest().getQueryString();
+            var http = servletRequest.getServletRequest();
+
+            // 1) token 안전 추출 (query → header 순)
             String token = null;
 
-            // 1. 쿼리 파라미터에서 토큰 추출
-            if (query != null && query.contains("token=")) {
-                token = query.replaceFirst(".*token=", "");
-                log.debug(">> 쿼리 파라미터 token: {}", token);
-            }
-
-            // 2. Authorization 헤더 fallback
-            if (token == null) {
-                String authHeader = servletRequest.getServletRequest().getHeader("Authorization");
-                if (authHeader != null && authHeader.startsWith("Bearer ")) {
-                    token = authHeader.substring(7);
-                    log.debug(">> Authorization 헤더 token: {}", token);
-                }
-            }
-
-            // 3. 토큰 검증
-            if (token != null) {
-                TokenStatus status = jwtUtil.getTokenValidationStatus(token);
-
-                if (status == TokenStatus.VALID) {
-                    Authentication authentication = jwtUtil.getAuthentication(token);
-
-                    if (authentication != null && authentication.isAuthenticated()) {
-                        Object principal = authentication.getPrincipal();
-
-                        if (principal instanceof User user) {
-                            attributes.put("user", user);
-                        } else if (principal instanceof UserDetails userDetails) {
-                            User user = userRepository.findByUserIdAndDeletedFalse(userDetails.getUsername());
-                            attributes.put("user", user);
-                        } else {
-                            log.warn("알 수 없는 principal 타입: {}", principal.getClass());
-                        }
-
-                        return true;
-                    } else {
-                        log.warn("인증 객체 생성 실패");
+            String query = http.getQueryString();
+            if (query != null) {
+                for (String part : query.split("&")) {
+                    if (part.startsWith("token=")) {
+                        token = java.net.URLDecoder.decode(part.substring(6), java.nio.charset.StandardCharsets.UTF_8);
+                        break;
                     }
-                } else if (status == TokenStatus.EXPIRED) {
-                    log.warn("JWT 토큰 만료");
-                    response.setStatusCode(HttpStatus.UNAUTHORIZED);
-                    response.getHeaders().add("X-Auth-Error", "TOKEN_EXPIRED");
-                    return false;
-                } else {
-                    log.warn("JWT 토큰 비정상");
-                    response.setStatusCode(HttpStatus.UNAUTHORIZED);
-                    response.getHeaders().add("X-Auth-Error", "TOKEN_INVALID");
-                    return false;
                 }
             }
+            if (token == null) {
+                String authHeader = http.getHeader("Authorization");
+                if (authHeader != null && authHeader.startsWith("Bearer ")) {
+                    token = authHeader.substring(7).trim();
+                }
+            }
+
+            // 2) 토큰 없음 → 게스트 허용
+            if (token == null || token.isBlank()) {
+                String sid = http.getSession(true).getId();
+                String guestId = "guest:" + sid;
+                String guestNick = "익명의 사용자";
+
+                attributes.put("guest", Boolean.TRUE);
+                attributes.put("guestId", guestId);
+                attributes.put("guestNickname", guestNick);
+                return true;
+            }
+
+            // 3) 토큰 있음 -> 상태 확인
+            TokenStatus status = jwtUtil.getTokenValidationStatus(token);
+            if (status == TokenStatus.VALID) {
+                var auth = jwtUtil.getAuthentication(token);
+                if (auth != null && auth.isAuthenticated()) {
+                    Object principal = auth.getPrincipal();
+                    User user = null;
+                    if (principal instanceof User u) {
+                        user = u;
+                    } else if (principal instanceof org.springframework.security.core.userdetails.UserDetails ud) {
+                        user = userRepository.findByUserIdAndDeletedFalse(ud.getUsername());
+                    }
+                    if (user != null) {
+                        attributes.put("user", user);
+                        return true;
+                    }
+                }
+                // 인증객체 만들지 못하면 게스트로
+                attributes.put("guest", Boolean.TRUE);
+                return true;
+            }
+
+            // 4) INVALID/EXPIRED -> 차단하지 말고 게스트로 허용
+            attributes.put("guest", Boolean.TRUE);
+            return true;
         }
 
-        // token이 없음 또는 파싱 실패
-        log.warn("WebSocket 핸드셰이크 실패 - 401 Unauthorized");
-        response.setStatusCode(HttpStatus.UNAUTHORIZED);
-        response.getHeaders().add("X-Auth-Error", "TOKEN_MISSING_OR_INVALID");
+        // 비정상 요청만 차단
+        response.setStatusCode(HttpStatus.BAD_REQUEST);
         return false;
     }
 

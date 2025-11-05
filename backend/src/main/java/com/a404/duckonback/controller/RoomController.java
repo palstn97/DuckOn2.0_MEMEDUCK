@@ -1,11 +1,14 @@
 package com.a404.duckonback.controller;
 
 import com.a404.duckonback.dto.*;
+import com.a404.duckonback.entity.User;
 import com.a404.duckonback.enums.RoomSyncEventType;
 import com.a404.duckonback.exception.CustomException;
 import com.a404.duckonback.filter.CustomUserPrincipal;
+import com.a404.duckonback.service.ArtistService;
 import com.a404.duckonback.service.LiveRoomService;
 import com.a404.duckonback.service.RedisService;
+import com.a404.duckonback.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -31,7 +34,9 @@ public class RoomController {
 
     private final LiveRoomService liveRoomService;
     private final RedisService redisService;
+    private final ArtistService artistService;
     private final SimpMessagingTemplate messagingTemplate;
+    private final UserService userService;
 
     @Operation(summary = "방 생성",
             description = "새로운 라이브 방송 방을 생성합니다. 프로필 사진과 배경 이미지를 포함할 수 있습니다.")
@@ -219,7 +224,7 @@ public class RoomController {
             @AuthenticationPrincipal CustomUserPrincipal principal
     ) {
         LiveRoomDTO room = redisService.getRoomInfo(roomId.toString());
-        String entryAnswer = request.getEntryAnswer();
+        String entryAnswer = (request != null) ? request.getEntryAnswer() : null;
 
         if (room == null) {
             throw new CustomException("존재하지 않는 방입니다", HttpStatus.NOT_FOUND);
@@ -246,14 +251,16 @@ public class RoomController {
         // 로그인 사용자인 경우 참여자 목록에 추가
         if (principal != null) {
             redisService.addUserToRoom(roomId.toString(), principal.getUser());
-
-            long participantCount = redisService.getRoomUserCount(roomId.toString());
-            messagingTemplate.convertAndSend(
-                    "/topic/room/" + roomId + "/presence",
-                    new RoomPresenceDTO(roomId, participantCount)
-            );
-            room.setParticipantCount(participantCount);
+        }else{// 로그인 하지 않더라도 참여자 수 증가
+            redisService.addParticipantCountToRoom(roomId.toString());
         }
+
+        long participantCount = redisService.getRoomUserCount(roomId.toString());
+        messagingTemplate.convertAndSend(
+                "/topic/room/" + roomId + "/presence",
+                new RoomPresenceDTO(roomId, participantCount)
+        );
+        room.setParticipantCount(participantCount);
 
         return ResponseEntity.ok(room);
     }
@@ -265,11 +272,16 @@ public class RoomController {
             @RequestParam Long artistId,
             @AuthenticationPrincipal CustomUserPrincipal principal
     ) {
-        if (principal == null) {
-            throw new CustomException("로그인이 필요합니다.", HttpStatus.UNAUTHORIZED);
-        }
 
-        redisService.removeUserFromRoom(artistId.toString(), roomId.toString(), principal.getUser());
+        if (principal != null) {
+            redisService.removeUserFromRoom(
+                    artistId.toString(),
+                    roomId.toString(),
+                    principal.getUser()
+            );
+        }else{
+            redisService.decreaseParticipantCountFromRoom(roomId.toString());
+        }
 
         long participantCount = redisService.getRoomUserCount(roomId.toString());
         messagingTemplate.convertAndSend(
@@ -280,6 +292,48 @@ public class RoomController {
         return ResponseEntity.ok("방에서 퇴장하였습니다.");
     }
 
+    @Operation(summary = "방 강퇴", description = "방장이 현재 접속한 사용자를 방에서 강제 퇴장합니다.")
+    @PostMapping("/{roomId}/eject/{nickname}")
+    public ResponseEntity<?> ejectUserFromRoom(
+            @PathVariable Long roomId,
+            @PathVariable String nickname,
+            @RequestParam Long artistId,
+            @AuthenticationPrincipal CustomUserPrincipal principal
+    ) {
+
+        if (principal == null) {
+            throw new CustomException("로그인이 필요합니다.", HttpStatus.UNAUTHORIZED);
+        }
+
+        // Redis에서 현재 방 정보 조회 (없으면 내부에서 404 throw)
+        LiveRoomDTO room = redisService.getRoomInfo(roomId.toString());
+
+        // 호스트만 강제퇴장 가능
+        if (!principal.getUser().getUserId().equals(room.getHostId())) {
+            throw new CustomException("호스트만 강제퇴장 시킬 수 있습니다.", HttpStatus.FORBIDDEN);
+        }
+
+        User target = userService.findByNickname(nickname);
+        
+        
+        //강퇴 대상 user에게 강퇴 메세지 전송
+        messagingTemplate.convertAndSendToUser(target.getUserId(),"/queue/kick",roomId);
+
+        redisService.removeUserFromRoom(
+                artistId.toString(),
+                roomId.toString(),
+                target
+        );
+
+        long participantCount = redisService.getRoomUserCount(roomId.toString());
+        messagingTemplate.convertAndSend(
+                "/topic/room/" + roomId + "/presence",
+                new RoomPresenceDTO(roomId, participantCount)
+        );
+
+        return ResponseEntity.ok("방에서 강퇴하였습니다.");
+    }
+
     @Operation(summary = "방 목록 조회", description = "현재 존재하는 모든 방 목록을 조회합니다.")
     @GetMapping
     public ResponseEntity<Map<String, Object>> getAllRoomSummaries(@RequestParam Long artistId) {
@@ -288,6 +342,29 @@ public class RoomController {
         Map<String, Object> response = new HashMap<>();
         response.put("roomInfoList", rooms);
 
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "홈 화면 아티스트별 라이브룸 조회", 
+           description = "홈 화면에 표시할 랜덤 아티스트와 각 아티스트의 인기 라이브룸을 조회합니다. (참여자 수 내림차순)")
+    @GetMapping("/home")
+    public ResponseEntity<Map<String, Object>> getHomeRooms(
+            @RequestParam(defaultValue = "3") int artistCount,
+            @RequestParam(defaultValue = "6") int roomsPerArtist) {
+        
+        // 기존 ArtistService를 활용하여 랜덤 아티스트 조회
+        List<ArtistDTO> randomArtists = artistService.getRandomArtists(artistCount);
+        
+        List<Long> artistIds = randomArtists.stream()
+                .map(ArtistDTO::getArtistId)
+                .toList();
+        
+        // 각 아티스트별 라이브룸 조회 (참여자 수 내림차순)
+        List<HomeArtistRoomDTO> artistRooms = redisService.getHomeArtistRooms(artistIds, roomsPerArtist);
+        
+        Map<String, Object> response = new HashMap<>();
+        response.put("artistRooms", artistRooms);
+        
         return ResponseEntity.ok(response);
     }
 

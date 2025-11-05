@@ -25,6 +25,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
     boolean existsByUserIdAndDeletedFalse(String userId);
     boolean existsByNicknameAndDeletedFalse(String nickname);
 
+    Optional<User> findByNickname(String nickname);
+
     // 소셜 로그인용: deleted=false 버전 추가 (기존 메서드는 점진적 교체)
     Optional<User> findByProviderAndProviderIdAndDeletedFalse(SocialProvider provider, String providerId);
 
@@ -39,7 +41,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByUserIdWithPenalties(@Param("userId") String userId);
 
     @Query("""
-    SELECT u 
+    SELECT u
     FROM User u
       LEFT JOIN FETCH u.artistFollows af
       LEFT JOIN FETCH af.artist
@@ -78,12 +80,11 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     /** 얇은 프로필 벌크 조회 (탈퇴 제외) */
     @Query("""
-      SELECT u.userId AS userId, u.nickname AS nickname, u.imgUrl AS imgUrl
-      FROM User u
-      WHERE u.userId IN :userIds
-        AND u.deleted = false
+       select u.id as id, u.userId as userId, u.nickname as nickname, u.imgUrl as imgUrl
+       from User u
+       where u.deleted = false and u.userId in :ids
     """)
-    List<UserBrief> findBriefsByUserIdIn(@Param("userIds") Collection<String> userIds);
+    List<UserBrief> findBriefsByIdIn(@Param("ids") Collection<String> ids);
 
     /** 랜덤 보충용: 활성 유저 페이징 */
     Page<User> findAllByDeletedFalse(Pageable pageable);

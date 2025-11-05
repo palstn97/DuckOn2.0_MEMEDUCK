@@ -9,9 +9,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -26,6 +26,7 @@ import java.util.List;
 
 @Configuration
 @RequiredArgsConstructor
+@EnableMethodSecurity(prePostEnabled = true)
 public class SecurityConfig {
 
     //    private final CustomUserDetailsService userDetailsService; // 자동 주입되어서 사용하지 않음
@@ -35,6 +36,7 @@ public class SecurityConfig {
     private final OAuth2AuthSuccessHandler  oauth2SuccessHandler;
     private final OAuth2AuthFailureHandler  oauth2FailureHandler;
     private final JWTAuthenticationEntryPoint jwtAuthenticationEntryPoint;
+    private final RestAccessDeniedHandler accessDeniedHandler;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -103,12 +105,15 @@ public class SecurityConfig {
                                 .requestMatchers(HttpMethod.GET, "/api/artists/random").permitAll()    // 랜덤
                                 .requestMatchers(HttpMethod.GET, "/api/artists/*").permitAll()         // 단일 상세
                                 .requestMatchers(HttpMethod.GET, "/api/chat/artist/**").permitAll() // 채팅 내역 조회
+                                .requestMatchers(HttpMethod.POST, "/api/rooms/*/enter").permitAll()
+                                .requestMatchers(HttpMethod.POST,"/api/rooms/*/exit").permitAll()
                                 .requestMatchers(HttpMethod.GET, "/api/rooms").permitAll() // 방 목록 조회
                                 .requestMatchers(HttpMethod.GET, "/api/rooms/*").permitAll() // 방 상세 조회 // 막아야하지만 프론트가 처리했다고 막지 말라고 요청하심
                                 .requestMatchers(HttpMethod.GET, "/api/rooms/trending/*").permitAll() // 트렌딩 방 조회
                                 .requestMatchers(HttpMethod.GET, "/api/users/recommendations").permitAll() // 추천 유저 조회
                                 .requestMatchers(HttpMethod.GET, "/api/public/youtube/meta/*").permitAll() // 유튜브 메타데이터 조회
 
+                                .requestMatchers("/api/admin/**").hasRole("ADMIN") // Admin API
                                 // Auth API
                                 .requestMatchers("/api/auth/logout").authenticated()
                                 .requestMatchers("/api/auth/**", "/oauth2/**", "/swagger-ui/**", "/v3/api-docs/**", "/swagger-resources/**", "/webjars/**").permitAll()
@@ -128,15 +133,7 @@ public class SecurityConfig {
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)// 3. 예외 처리: 인증/인가 실패 시 진입점 지정
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(jwtAuthenticationEntryPoint)     // 유효하지 않은 토큰 등
-                        .accessDeniedHandler(                                      // 권한 부족 시
-                                (request, response, accessDeniedException) -> {
-                                    response.setStatus(HttpStatus.FORBIDDEN.value());
-                                    response.setContentType("application/json");
-                                    response
-                                            .getWriter()
-                                            .write("{\"error\":\"Access Denied\"}");
-                                }
-                        )
+                        .accessDeniedHandler(accessDeniedHandler)               // 권한 부족
                 );
 
         return http.build();
