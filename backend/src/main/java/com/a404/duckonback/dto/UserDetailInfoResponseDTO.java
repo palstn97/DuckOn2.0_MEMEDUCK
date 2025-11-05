@@ -19,9 +19,11 @@ public class UserDetailInfoResponseDTO {
     private List<Long> artistList;
     private int followingCount;
     private int followerCount;
-    private String password;
     private boolean socialLogin;
     private List<RoomDTO> roomList;
     private List<PenaltyDTO> penaltyList;
+
+    // 랭킹
+    private UserRankDTO userRank;
 
 }

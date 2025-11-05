@@ -571,6 +571,7 @@ import com.a404.duckonback.util.Anonymizer;
 import com.a404.duckonback.util.JWTUtil;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -603,6 +604,7 @@ public class UserServiceImpl implements UserService {
     private final TokenBlacklistService tokenBlacklistService;
     private final JWTUtil jWTUtil;
     private final RedisTemplate<String, Object> redisTemplate;
+    private final UserRankService userRankService;
 
     // --- 가벼운 규칙 상수 ---
     private static final int SIZE_DEFAULT = 10;
@@ -703,6 +705,7 @@ public class UserServiceImpl implements UserService {
                 .socialLogin(isSocial)
                 .penaltyList(pennaltyList)
                 .roomList(roomList)
+                .userRank(userRankService.getUserRank(user.getId()))
                 .build();
     }
 
@@ -752,6 +755,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public UserInfoResponseDTO getUserInfo(String myUserId, String otherUserId) {
         if (myUserId == null) throw new CustomException("사용자 ID가 제공되지 않았습니다", HttpStatus.BAD_REQUEST);
         if (!userRepository.existsByUserIdAndDeletedFalse(otherUserId))
@@ -759,12 +763,15 @@ public class UserServiceImpl implements UserService {
 
         User user = userRepository.findByUserIdAndDeletedFalse(otherUserId);
 
-        // 과거 히스토리
-        List<RoomDTO> roomList = roomRepository.findByCreator_Id(user.getId())
-                .stream().map(RoomDTO::fromEntity).toList();
+        Page<RoomSummaryDTO> roomPage = roomRepository.findRoomSummariesByCreatorIdOrderByCreatedAtDesc(
+                user.getId(), PageRequest.of(0, 10)
+        );
 
         // 현재 라이브(레디스)
         RoomListInfoDTO active = redisService.getActiveRoomByHost(otherUserId);
+
+        // 랭킹
+        UserRankDTO rankDTO = userRankService.getUserRank(user.getId());
 
         return UserInfoResponseDTO.builder()
                 .userId(user.getUserId())
@@ -773,8 +780,9 @@ public class UserServiceImpl implements UserService {
                 .followingCount(Optional.ofNullable(user.getFollowing()).orElse(List.of()).size())
                 .followerCount(Optional.ofNullable(user.getFollowers()).orElse(List.of()).size())
                 .following(followService.isFollowing(myUserId, otherUserId))
-                .roomList(roomList)
+                .roomList(roomPage.getContent())
                 .activeRoom(active)
+                .userRank(rankDTO)
                 .build();
     }
 
@@ -799,6 +807,7 @@ public class UserServiceImpl implements UserService {
                         .nickname(f.getNickname())
                         .profileImgUrl(f.getImgUrl())
                         .following(followService.isFollowing(userId, f.getUserId()))
+                        .userRankDTO(userRankService.getUserRank(f.getId()))
                         .build())
                 .toList();
 
@@ -826,6 +835,7 @@ public class UserServiceImpl implements UserService {
                         .userId(f.getUserId())
                         .nickname(f.getNickname())
                         .profileImgUrl(f.getImgUrl())
+                        .userRank(userRankService.getUserRank(f.getId()))
                         .build())
                 .toList();
 
