@@ -12,4 +12,5 @@ public class FollowerInfoDTO {
     private String userId;
     private boolean following;
     private String profileImgUrl;
+    private UserRankDTO userRankDTO;
 }
