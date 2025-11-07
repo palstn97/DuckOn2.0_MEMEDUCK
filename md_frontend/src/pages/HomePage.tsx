@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Container, Box, Typography, CircularProgress } from '@mui/material';
 import { useInView } from 'react-intersection-observer';
 import Header from '../components/layout/Header';
@@ -6,18 +6,59 @@ import MemeCard from '../components/meme/MemeCard';
 import MasonryGrid from '../components/meme/MasonryGrid';
 import PopularTags from '../components/tag/PopularTags';
 import { Flame, Sparkles } from 'lucide-react';
+import { useUserStore } from '../store/useUserStore';
+import { getAccessToken } from '../api/axiosInstance';
 
 const HomePage = () => {
+  const { myUser, setMyUser } = useUserStore();
+
+  // 페이지 로드 시 토큰이 있으면 사용자 정보 로드
+  useEffect(() => {
+    const loadUserIfLoggedIn = async () => {
+      const token = getAccessToken();
+      if (token && !myUser) {
+        try {
+          const { fetchMyProfile } = await import('../api/userService');
+          const userData = await fetchMyProfile();
+          const normalized = { ...userData, artistList: userData.artistList ?? [] } as any;
+          setMyUser(normalized);
+        } catch (error) {
+          console.error('사용자 정보 로드 실패:', error);
+        }
+      }
+    };
+    loadUserIfLoggedIn();
+  }, [myUser, setMyUser]);
+
   // 실제 GIF URL 사용
   const gifUrls = [
-    'https://media1.tenor.com/m/elCp2_fukbwAAAAC/%EC%9D%B4%EC%9E%AC%EB%AA%85-%EB%8D%94%EB%B6%88%EC%96%B4%EB%AF%BC%EC%A3%BC%EB%8B%B9.gif',
-    'https://media1.tenor.com/m/hOjxKIQML6YAAAAC/%EC%A2%8B%EB%B9%A0%EA%B0%80-%EC%9C%A4%EC%84%9D%EC%97%B4.gif',
-    'https://media1.tenor.com/m/tOKJBiXdgmUAAAAC/%ED%95%9C%EA%B5%AD%EC%98%81%ED%99%94.gif',
-    'https://media1.tenor.com/m/hFbzrQZ1oNEAAAAC/%EC%9D%B4%EC%9E%AC%EB%AA%85-%EB%8D%94%EB%B6%88%EC%96%B4%EB%AF%BC%EC%A3%BC%EB%8B%B9.gif',
-    'https://media1.tenor.com/m/9NVSJSAuVhUAAAAd/%EC%9D%B4%EC%9E%AC%EB%AA%85-%EB%8D%94%EB%B6%88%EC%96%B4%EB%AF%BC%EC%A3%BC%EB%8B%B9.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/kpop_6.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/aespa_giselle_1.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/aespa_karina_1.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/aespa_ningning_1.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/aespa_ningning_2.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/aespa_winter_1.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/blackpink_jennie_1.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/blackpink_jennie_2.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/blackpink_jennie_3.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/blackpink_jennie_4.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/blackpink_jennie_5.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/blackpink_jennie.jpg',
+    'https://d23breqm38jov9.cloudfront.net/memes/blackpink_jennie1.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/blackpink_jisoo.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/bts_1.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/bts_suga_1.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/ive_leeseo_1.jpg',
+    'https://d23breqm38jov9.cloudfront.net/memes/kpop_1.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/kpop_2.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/kpop_3.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/kpop_4.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/kpop_5.gif',
+    'https://d23breqm38jov9.cloudfront.net/memes/lesserafim_hyj_1.jpg',
+    'https://d23breqm38jov9.cloudfront.net/memes/produce.gif',
   ];
 
-  const popularTags = ['BTS', '블랙핑크', '뉴진스', 'SEVENTEEN', 'IVE', '에스파', 'NCT', 'TWICE'];
+  const popularTags = ['NMIXX', '해원', '릴리', '설윤', '배이', '지우', '규진', 'JYP'];
   
   // GIF URL을 섞어서 사용
   const getRandomGifUrl = () => gifUrls[Math.floor(Math.random() * gifUrls.length)];
@@ -27,7 +68,7 @@ const HomePage = () => {
     Array.from({ length: 8 }, (_, i) => ({
       id: `trending-${i}`,
       gifUrl: getRandomGifUrl(),
-      tags: ['이재명', '정치', '웃긴'],
+      tags: ['NMIXX', '해원', '귀여운'],
       viewCount: Math.floor(Math.random() * 100000) + 50000,
       likeCount: Math.floor(Math.random() * 10000) + 1000,
       isLiked: Math.random() > 0.5,
@@ -39,7 +80,7 @@ const HomePage = () => {
     Array.from({ length: 20 }, (_, i) => ({
       id: `all-${i}`,
       gifUrl: getRandomGifUrl(),
-      tags: ['윤석열', '한국영화', '밈'],
+      tags: ['NMIXX', '배이', '웃긴'],
       viewCount: Math.floor(Math.random() * 50000) + 10000,
       likeCount: Math.floor(Math.random() * 5000) + 500,
       isLiked: Math.random() > 0.5,
@@ -61,7 +102,7 @@ const HomePage = () => {
       const newMemes = Array.from({ length: 12 }, (_, i) => ({
         id: `all-${currentLength + i}`,
         gifUrl: getRandomGifUrl(),
-        tags: ['윤석열', '한국영화', '밈'],
+        tags: ['NMIXX', '배이', '웃긴'],
         viewCount: Math.floor(Math.random() * 50000) + 10000,
         likeCount: Math.floor(Math.random() * 5000) + 500,
         isLiked: Math.random() > 0.5,
@@ -115,12 +156,12 @@ const HomePage = () => {
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 4 }}>
               <Box
                 sx={{
-                  background: 'linear-gradient(135deg, #10B981 0%, #14B8A6 100%)',
-                  borderRadius: 2,
+                  background: 'linear-gradient(135deg, #9333EA 0%, #EC4899 100%)',
+                  borderRadius: 3,
                   p: 1.5,
                   display: 'flex',
                   alignItems: 'center',
-                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+                  boxShadow: '0 6px 20px rgba(147, 51, 234, 0.4)',
                 }}
               >
                 <Flame size={28} color="white" />
@@ -129,7 +170,7 @@ const HomePage = () => {
                 variant="h4" 
                 fontWeight={800}
                 sx={{
-                  background: 'linear-gradient(135deg, #10B981 0%, #14B8A6 100%)',
+                  background: 'linear-gradient(135deg, #9333EA 0%, #EC4899 100%)',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
                 }}
@@ -150,12 +191,12 @@ const HomePage = () => {
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 4 }}>
               <Box
                 sx={{
-                  background: 'linear-gradient(135deg, #059669 0%, #0D9488 100%)',
-                  borderRadius: 2,
+                  background: 'linear-gradient(135deg, #7C3AED 0%, #9333EA 100%)',
+                  borderRadius: 3,
                   p: 1.5,
                   display: 'flex',
                   alignItems: 'center',
-                  boxShadow: '0 4px 12px rgba(5, 150, 105, 0.3)',
+                  boxShadow: '0 6px 20px rgba(124, 58, 237, 0.4)',
                 }}
               >
                 <Sparkles size={28} color="white" />
@@ -164,7 +205,7 @@ const HomePage = () => {
                 variant="h4" 
                 fontWeight={800}
                 sx={{
-                  background: 'linear-gradient(135deg, #059669 0%, #0D9488 100%)',
+                  background: 'linear-gradient(135deg, #7C3AED 0%, #9333EA 100%)',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
                 }}
@@ -196,7 +237,7 @@ const HomePage = () => {
                     boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
                   }}
                 >
-                  <CircularProgress size={20} sx={{ color: '#10B981' }} />
+                  <CircularProgress size={20} sx={{ color: '#9333EA' }} />
                   <Typography variant="body2" fontWeight={600} color="text.secondary">
                     더 많은 밈 불러오는 중...
                   </Typography>

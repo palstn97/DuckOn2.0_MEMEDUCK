@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Box, InputBase } from '@mui/material';
 import { Search } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 const SearchBar = () => {
+  const navigate = useNavigate();
   const [isScrolled, setIsScrolled] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     const handleScroll = () => {
@@ -15,6 +17,14 @@ const SearchBar = () => {
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchQuery.trim()) {
+      navigate(`/search/${encodeURIComponent(searchQuery.trim())}`);
+      setSearchQuery(''); // 검색 후 입력창 초기화
+    }
+  };
 
   return (
     <Box
@@ -44,6 +54,8 @@ const SearchBar = () => {
         >
           <Box sx={{ maxWidth: '600px', mx: 'auto' }}>
             <Box
+              component="form"
+              onSubmit={handleSearch}
               sx={{
                 position: 'relative',
                 display: 'flex',
@@ -72,6 +84,13 @@ const SearchBar = () => {
               <Search size={18} color="rgba(255, 255, 255, 0.7)" strokeWidth={2} />
               <InputBase
                 placeholder="검색"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleSearch(e as any);
+                  }
+                }}
                 sx={{
                   ml: 1.5,
                   flex: 1,
@@ -112,6 +131,8 @@ const SearchBar = () => {
         >
           <Box sx={{ width: '100%', maxWidth: '780px' }}>
             <Box
+              component="form"
+              onSubmit={handleSearch}
               sx={{
                 position: 'relative',
                 display: 'flex',
@@ -143,7 +164,9 @@ const SearchBar = () => {
               {/* 로고 (검색창 내부) */}
               <Link to="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', marginRight: '12px' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Box sx={{ fontSize: '1.5rem', lineHeight: 1 }}>🦆</Box>
+                  <Box sx={{ width: '24px', height: '24px', display: 'flex', alignItems: 'center' }}>
+                    <img src="/duck.svg" alt="MEMEDUCK" style={{ width: '100%', height: '100%' }} />
+                  </Box>
                   <Box
                     className="logo-text"
                     sx={{
@@ -174,6 +197,13 @@ const SearchBar = () => {
               <Search size={18} color="rgba(255, 255, 255, 0.7)" strokeWidth={2} />
               <InputBase
                 placeholder="검색"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleSearch(e as any);
+                  }
+                }}
                 sx={{
                   ml: 1.5,
                   flex: 1,
