@@ -372,12 +372,12 @@ build_memeduck_front:
     - |
       # 브랜치/타겟에 따라 API Base 설정
       if [ "$CI_COMMIT_BRANCH" = "master" ] || [ "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" = "master" ]; then
-        API_BASE="${VITE_API_BASE_URL_PROD:-/api}"
+        API_BASE="${VITE_API_BASE_URL_MD_PROD:-/api}"
       else
-        API_BASE="${VITE_API_BASE_URL_DEV:-/api}"
+        API_BASE="${VITE_API_BASE_URL_MD_DEV:-/api}"
       fi
-      echo "VITE_API_BASE_URL=$API_BASE"
-      VITE_API_BASE_URL="$API_BASE" npm run build
+      echo "VITE_API_BASE_URL_MD=$API_BASE"
+      VITE_API_BASE_URL_MD="$API_BASE" npm run build
   artifacts:
     paths:
       - $MD_FE_DIR/dist
