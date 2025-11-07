@@ -42,9 +42,14 @@ public class JWTFilter extends OncePerRequestFilter {
     // 완전 스킵(필터 미적용) 경로
     private static final List<String> WHITELIST = List.of(
             "/api/auth/**",
+            "/login/oauth2/**",
             "/oauth2/**",
             "/swagger-ui/**", "/v3/api-docs/**", "/swagger-resources/**", "/webjars/**",
             "/ws-chat/**"
+    );
+
+    private static final List<String> BLACKLIST = List.of(
+            "/api/auth/logout"
     );
 
     private boolean matchesAny(String uri, List<String> patterns) {
@@ -56,6 +61,7 @@ public class JWTFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) return true;
         String uri = request.getRequestURI();
+        if (matchesAny(uri, BLACKLIST)) return false;
         return matchesAny(uri, WHITELIST);
     }
 

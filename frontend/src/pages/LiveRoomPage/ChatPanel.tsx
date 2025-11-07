@@ -728,12 +728,6 @@ function countGraphemes(s: string): number {
   return [...s].length;
 }
 
-// 이미지 URL 패턴 감지 (jpg, jpeg, png, gif, webp 등)
-function isImageUrl(text: string): boolean {
-  const imageUrlPattern = /^https?:\/\/.+\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
-  return imageUrlPattern.test(text.trim());
-}
-
 const MAX_LEN = 100;
 
 // --- 차단 확인 모달 컴포넌트 ---
@@ -992,7 +986,6 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
             const isMyMessage =
               String(msg.senderId ?? "") === String(myUser?.userId ?? "");
             const contentToShow = msg.content;
-            const isImage = isImageUrl(contentToShow);
 
             return (
               <div
@@ -1005,51 +998,24 @@ const ChatPanel = ({ messages, sendMessage, onBlockUser }: ChatPanelProps) => {
                   {msg.senderNickName}
                 </span>
                 <div
-                  className={`group relative flex items-end gap-2 ${
-                    isImage ? "max-w-[70%]" : "max-w-[85%]"
-                  } ${isMyMessage ? "flex-row-reverse" : "flex-row"}`}
+                  className={`group relative flex items-end gap-2 max-w-[85%] ${
+                    isMyMessage ? "flex-row-reverse" : "flex-row"
+                  }`}
                 >
                   {/* 말풍선 */}
                   <div
-                    className={`relative group rounded-lg text-sm ${
-                      isImage
-                        ? "p-1 bg-transparent"
-                        : `px-4 py-2 ${isMyMessage ? "bg-purple-600" : "bg-gray-700"}`
-                    } ${!isImage && "break-all"}`}
+                    className={`relative group px-4 py-2 rounded-lg text-sm ${
+                      isMyMessage ? "bg-purple-600" : "bg-gray-700"
+                    } break-all`}
                   >
-                    {isImage ? (
-                      <img
-                        src={contentToShow}
-                        alt="채팅 이미지"
-                        className="rounded-lg max-w-full h-auto max-h-[300px] object-contain"
-                        onError={(e) => {
-                          // 이미지 로드 실패 시 URL 텍스트로 표시
-                          e.currentTarget.style.display = "none";
-                          const parent = e.currentTarget.parentElement;
-                          if (parent) {
-                            parent.className = `relative group px-4 py-2 rounded-lg text-sm ${
-                              isMyMessage ? "bg-purple-600" : "bg-gray-700"
-                            } break-all`;
-                            parent.innerHTML = `<span class="${!isMyMessage ? "pr-5" : ""}">${contentToShow}</span>`;
-                          }
-                        }}
-                      />
-                    ) : (
-                      <span className={!isMyMessage ? "pr-5" : ""}>
-                        {contentToShow}
-                      </span>
-                    )}
+                    <span className={!isMyMessage ? "pr-5" : ""}>
+                      {contentToShow}
+                    </span>
 
-                    {/* 상대 메시지 옵션 - 이미지일 때는 배경 추가 */}
+                    {/* 상대 메시지 옵션 */}
                     {!isMyMessage && (
                       <Popover className="absolute top-1 right-1">
-                        <Popover.Button 
-                          className={`p-0.5 rounded-full focus:outline-none ${
-                            isImage 
-                              ? "bg-black/40 hover:bg-black/60" 
-                              : "hover:bg-black/20"
-                          }`}
-                        >
+                        <Popover.Button className="p-0.5 rounded-full hover:bg-black/20 focus:outline-none">
                           <MoreVertical size={14} className="text-white" />
                         </Popover.Button>
                         <Transition
