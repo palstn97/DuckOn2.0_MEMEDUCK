@@ -57,10 +57,11 @@ public class SecurityConfig {
                 "https://www.memeduck.site",
                 "https://duckon.site",
                 "https://www.duckon.site",
-                "https://d3jjanh0vyc8he.cloudfront.net",
+                "https://d3jianh0vyc8he.cloudfront.net",
                 "http://ec2-43-202-159-100.ap-northeast-2.compute.amazonaws.com",
                 "http://localhost:3000",
-                "http://127.0.0.1:3000"
+                "http://127.0.0.1:3000",
+                "http://localhost:5173/"
         ));
         configuration.setAllowedMethods(List.of("*"));        // 모든 Method 허용
         configuration.setAllowedHeaders(List.of("*"));        // 모든 Header 허용
@@ -100,15 +101,20 @@ public class SecurityConfig {
                                         "/swagger-resources/**",
                                         "/webjars/**",
                                         "/api/rooms/{roomId}/enter",
-                                        "/ws-chat/**"
+                                        "/ws-chat/**",
+                                        "/api/memes/random",
+                                        "/api/memes/top/**",
+                                        "/api/tags/**"
                                 ).permitAll()
 
                                 // 1) 인증 필요 API (특정 /me, /follow, PUT /follow)
                                 .requestMatchers("/api/artists/me").authenticated()
                                 .requestMatchers(HttpMethod.POST,   "/api/artists/*/follow").authenticated() // 팔로우
-                                .requestMatchers(HttpMethod.DELETE, "/api/artists/*/follow").authenticated() // 팔로우/언팔로우
+                                .requestMatchers(HttpMethod.DELETE, "/api/artists/*/follow").   authenticated() // 팔로우/언팔로우
                                 .requestMatchers(HttpMethod.PUT,    "/api/artists/follow").authenticated() // 팔로우/언팔로우 토글
                                 .requestMatchers(HttpMethod.POST, "/api/chat/artist/**").authenticated() // 채팅 메시지 전송
+                                .requestMatchers(HttpMethod.GET, "/api/memes/favorites").authenticated() // 즐겨찾기 밈 조회
+
                                 // 2) 누구나 볼 수 있는 조회 API
                                 .requestMatchers(HttpMethod.GET, "/api/artists").permitAll()           // 페이징 조회 & 키워드
                                 .requestMatchers(HttpMethod.GET, "/api/artists/random").permitAll()    // 랜덤
