@@ -56,17 +56,21 @@ build_frontend:
     - cd frontend
     - npm ci
     - |
+      # 브랜치에 따라 API Base 선택
       if [ "$CI_COMMIT_BRANCH" = "master" ] || [ "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" = "master" ]; then
         API_BASE="${VITE_API_BASE_URL_PROD:-/api}"
       else
         API_BASE="${VITE_API_BASE_URL_DEV:-/api}"
       fi
       echo "VITE_API_BASE_URL=$API_BASE"
-      VITE_API_BASE_URL="$API_BASE" npm run build
+      echo "VITE_YOUTUBE_API_KEY=$VITE_YOUTUBE_API_KEY"
+      # 👉 Vite 빌드에 둘 다 넘겨줌
+      VITE_API_BASE_URL="$API_BASE" VITE_YOUTUBE_API_KEY="$VITE_YOUTUBE_API_KEY" npm run build
   artifacts:
     paths:
       - frontend/dist
     expire_in: 1 week
+
 # ───────────────────────────────────────────────────────────
 # PROD: 프론트 (S3+CloudFront)
 # ───────────────────────────────────────────────────────────
@@ -119,14 +123,14 @@ deploy_backend_prod:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"'
     - when: never
-  needs: [build_backend]          # ← 핵심 수정
+  needs: [build_backend]
   before_script:
     - set -eo pipefail
     - yum -y install jq bash
     - '[ -n "$AWS_ACCESS_KEY_ID_PROD" ] || { echo "Missing: AWS_ACCESS_KEY_ID_PROD"; exit 1; }'
     - '[ -n "$AWS_SECRET_ACCESS_KEY_PROD" ] || { echo "Missing: AWS_SECRET_ACCESS_KEY_PROD"; exit 1; }'
     - '[ -n "$AWS_REGION_PROD" ] || { echo "Missing: AWS_REGION_PROD"; exit 1; }'
-    - '[ -n "$PROD_INSTANCE_ID" ] || { echo "Missing: PROD_INSTANCE_ID"; exit 1; }'   # ← 추가
+    - '[ -n "$PROD_INSTANCE_ID" ] || { echo "Missing: PROD_INSTANCE_ID"; exit 1; }'
     - export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID_PROD"
     - export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY_PROD"
     - export AWS_DEFAULT_REGION="$AWS_REGION_PROD"
@@ -299,6 +303,7 @@ deploy_dev:
     docker build \
       --pull --no-cache \
       --build-arg VITE_API_BASE_URL="__VITE_API_BASE_URL_DEV__" \
+      --build-arg VITE_YOUTUBE_API_KEY="__VITE_YOUTUBE_API_KEY__" \
       --build-arg BUILD_NOCACHE="$(date +%s)" \
       -t duckon-front:dev \
       -f frontend/Dockerfile frontend
@@ -334,6 +339,7 @@ deploy_dev:
       -e "s|__BE_APP_DEV__|$BE_APP_DEV|g" \
       -e "s|__FE_APP_DEV__|$FE_APP_DEV|g" \
       -e "s|__VITE_API_BASE_URL_DEV__|${VITE_API_BASE_URL_DEV:-/api}|g" \
+      -e "s|__VITE_YOUTUBE_API_KEY__|${VITE_YOUTUBE_API_KEY:-}|g" \
       remote-dev.sh
 
     # 원격 실행
