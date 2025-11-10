@@ -1,0 +1,63 @@
+package com.a404.duckonback.controller;
+
+import com.a404.duckonback.dto.MemeCreateRequestDTO;
+import com.a404.duckonback.dto.MemeCreateResponseDTO;
+import com.a404.duckonback.dto.MemeS3UploadResponseDTO;
+import com.a404.duckonback.filter.CustomUserPrincipal;
+import com.a404.duckonback.response.ApiResponseDTO;
+import com.a404.duckonback.response.SuccessCode;
+import com.a404.duckonback.service.MemeS3Service;
+import com.a404.duckonback.service.MemeService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+@Tag(name = "밈 관리", description = "")
+@RestController
+@RequestMapping("/api/meme")
+@RequiredArgsConstructor
+public class MemeController {
+
+    private final MemeService memeService;
+    private final MemeS3Service memeS3Service;
+
+    @Operation(
+            summary = "밈 생성(DB까지 저장)",
+            description = "새로운 밈을 등록합니다. 최대 3개의 밈을 업로드할 수 있으며 각 밈마다 태그를 지정할 수 있습니다." +
+                    "‼️스웨거에서 'Send empty value'를 체크하면 에러가 납니다. 체크를 해제하고 빈값을 보내주세요‼️"
+    )
+    @PostMapping(value = "/create", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponseDTO<MemeCreateResponseDTO>> create(
+            @AuthenticationPrincipal CustomUserPrincipal principal,
+            @ModelAttribute MemeCreateRequestDTO request
+    ) {
+        Long userId = principal.getId();
+        MemeCreateResponseDTO res = memeService.createMeme(userId, request);
+
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(ApiResponseDTO.success(SuccessCode.MEME_UPLOAD_SUCCESS, res));
+    }
+
+    @Operation(
+            summary = "밈 S3에 업로드(테스트용)",
+            description = "파일을 S3에 업로드합니다."
+    )
+    @PostMapping(
+            value = "/upload-s3-only",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
+    public ResponseEntity<ApiResponseDTO<MemeS3UploadResponseDTO>> uploadToS3(
+            @RequestPart("file") MultipartFile file
+    ) {
+        MemeS3UploadResponseDTO result = memeS3Service.uploadMeme(file);
+        return ResponseEntity.ok(ApiResponseDTO.success(SuccessCode.FILE_S3_UPLOAD_SUCCESS, result));
+    }
+
+}
