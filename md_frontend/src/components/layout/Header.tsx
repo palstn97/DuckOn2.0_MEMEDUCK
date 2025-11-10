@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Box, Menu, MenuItem, ListItemIcon, ListItemText, Divider, InputBase } from '@mui/material';
-import { Upload, User, UserCircle, LogOut, Search } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Box, Menu, MenuItem, ListItemIcon, ListItemText, Divider, InputBase, Avatar } from '@mui/material';
+import { Upload, UserCircle, LogOut, Search } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion, LayoutGroup } from 'framer-motion';
+import { useUserStore } from '../../store/useUserStore';
 
 interface HeaderProps {
   showSearchBar?: boolean;
@@ -15,6 +16,10 @@ const Header = ({ showSearchBar = false }: HeaderProps) => {
   const [searchFocused, setSearchFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const open = Boolean(anchorEl);
+  const navigate = useNavigate();
+  
+  // 로그인 상태 확인
+  const { myUser, logout } = useUserStore();
 
   useEffect(() => {
     if (!showSearchBar) return;
@@ -39,6 +44,14 @@ const Header = ({ showSearchBar = false }: HeaderProps) => {
     }
   }, [isScrolled, searchFocused, showSearchBar]);
 
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    if (q) {
+      navigate(`/search/${encodeURIComponent(q)}`);
+    }
+  };
+
   const handleUserMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
   };
@@ -48,9 +61,19 @@ const Header = ({ showSearchBar = false }: HeaderProps) => {
   };
 
   const handleLogout = () => {
-    // TODO: 로그아웃 로직
-    console.log('로그아웃');
+    logout();
     handleUserMenuClose();
+    navigate('/');
+  };
+
+  const handleUserIconClick = (event: React.MouseEvent<HTMLElement>) => {
+    if (!myUser) {
+      // 비로그인 상태면 로그인 페이지로 이동
+      navigate('/login');
+    } else {
+      // 로그인 상태면 메뉴 열기
+      handleUserMenuOpen(event);
+    }
   };
 
   return (
@@ -60,11 +83,11 @@ const Header = ({ showSearchBar = false }: HeaderProps) => {
         sx={{
           position: 'sticky',
           top: 0,
-          background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.5) 0%, rgba(20, 184, 166, 0.95) 100%)',
-          backdropFilter: 'blur(12px)',
+          background: 'linear-gradient(to right, rgba(124, 58, 237, 0.95), rgba(236, 72, 153, 0.95))',
+          backdropFilter: 'blur(12px) saturate(180%)',
           borderBottom: '1px solid',
           borderColor: 'rgba(255, 255, 255, 0.2)',
-          boxShadow: '0 4px 16px rgba(16, 185, 129, 0.15)',
+          boxShadow: '0 4px 20px rgba(147, 51, 234, 0.25)',
           zIndex: 1000,
         }}
       >
@@ -89,7 +112,9 @@ const Header = ({ showSearchBar = false }: HeaderProps) => {
           {/* 로고 */}
           <Link to="/" style={{ textDecoration: 'none', flexShrink: 0 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-              <Box sx={{ fontSize: '1.75rem', lineHeight: 1 }}>🦆</Box>
+              <Box sx={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center' }}>
+                <img src="/duck.svg" alt="MEMEDUCK" style={{ width: '100%', height: '100%' }} />
+              </Box>
               <Box
                 sx={{
                   fontSize: '1.25rem',
@@ -117,27 +142,30 @@ const Header = ({ showSearchBar = false }: HeaderProps) => {
               style={{ flexGrow: 1, maxWidth: '600px' }}
             >
               <Box
+                component="form"
+                onSubmit={handleSearchSubmit}
                 sx={{
                   position: 'relative',
                   display: 'flex',
                   alignItems: 'center',
-                  bgcolor: 'rgba(255, 255, 255, 0.2)',
-                  borderRadius: 2,
+                  bgcolor: 'rgba(255, 255, 255, 0.25)',
+                  borderRadius: 3,
                   px: 2,
                   height: 40,
-                  transition: 'all 0.2s ease',
+                  transition: 'all 0.3s ease',
                   border: '1px solid rgba(255, 255, 255, 0.3)',
                   '&:focus-within': {
                     bgcolor: 'white',
-                    boxShadow: '0 0 0 2px rgba(255, 255, 255, 0.5)',
+                    boxShadow: '0 0 0 2px rgba(147, 51, 234, 0.5)',
+                    borderColor: 'rgba(147, 51, 234, 0.5)',
                     '& svg': {
-                      color: '#10B981',
+                      color: '#9333EA',
                     },
                     '& input': {
                       color: '#1F2937',
                     },
                     '& input::placeholder': {
-                      color: '#9CA3AF',
+                      color: '#6B7280',
                     },
                   },
                 }}
@@ -160,6 +188,12 @@ const Header = ({ showSearchBar = false }: HeaderProps) => {
                   onFocus={() => setSearchFocused(true)}
                   onBlur={() => setSearchFocused(false)}
                   inputRef={inputRef}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      // 강제 제출
+                      handleSearchSubmit(e as any);
+                    }
+                  }}
                 />
               </Box>
             </motion.div>
@@ -172,6 +206,7 @@ const Header = ({ showSearchBar = false }: HeaderProps) => {
 
           {/* 우측 버튼들 */}
           <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+            {/* 업로드 버튼 - 항상 표시 */}
             <Link to="/upload" style={{ textDecoration: 'none' }}>
               <Box
                 sx={{
@@ -181,32 +216,32 @@ const Header = ({ showSearchBar = false }: HeaderProps) => {
                   px: 2.5,
                   py: 1,
                   bgcolor: 'white',
-                  borderRadius: 2,
+                  borderRadius: 3,
                   cursor: 'pointer',
-                  transition: 'all 0.2s ease',
+                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                   boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
                   '&:hover': {
                     bgcolor: 'white',
-                    transform: 'translateY(-2px)',
-                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                    transform: 'translateY(-2px) scale(1.02)',
+                    boxShadow: '0 6px 20px rgba(147, 51, 234, 0.3)',
                     '& svg': {
-                      color: '#059669',
+                      color: '#7C3AED',
                     },
                     '& .upload-text': {
-                      color: '#059669',
+                      color: '#7C3AED',
                     },
                   },
                 }}
               >
-                <Upload size={16} color="#10B981" strokeWidth={2.5} />
+                <Upload size={16} color="#9333EA" strokeWidth={2.5} />
                 <Box
                   className="upload-text"
                   sx={{
                     fontSize: '0.875rem',
                     fontWeight: 700,
-                    color: '#10B981',
+                    color: '#9333EA',
                     display: { xs: 'none', sm: 'block' },
-                    transition: 'color 0.2s ease',
+                    transition: 'color 0.3s ease',
                   }}
                 >
                   업로드
@@ -214,28 +249,94 @@ const Header = ({ showSearchBar = false }: HeaderProps) => {
               </Box>
             </Link>
 
-            <Box
-              onClick={handleUserMenuOpen}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 36,
-                height: 36,
-                bgcolor: open ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.15)',
-                borderRadius: '50%',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                border: '2px solid rgba(255, 255, 255, 0.4)',
-                '&:hover': {
-                  bgcolor: 'rgba(255, 255, 255, 0.3)',
-                  borderColor: 'rgba(255, 255, 255, 0.6)',
-                  transform: 'scale(1.05)',
-                },
-              }}
-            >
-              <User size={18} color="white" strokeWidth={2.5} />
-            </Box>
+            {myUser ? (
+              <>
+                {/* 로그인 상태: 닉네임 + 유저 아이콘 */}
+                <Box
+                  sx={{
+                    display: { xs: 'none', sm: 'flex' },
+                    alignItems: 'center',
+                    gap: 1,
+                    px: 2,
+                    py: 0.5,
+                    bgcolor: 'rgba(255, 255, 255, 0.2)',
+                    borderRadius: 2,
+                  }}
+                >
+                  <Box
+                    sx={{
+                      fontSize: '0.875rem',
+                      fontWeight: 600,
+                      color: 'white',
+                    }}
+                  >
+                    {myUser.nickname}
+                  </Box>
+                </Box>
+                <Avatar
+                  onClick={handleUserIconClick}
+                  src={myUser?.imgUrl || '/default_image.png'}
+                  sx={{
+                    width: 36,
+                    height: 36,
+                    cursor: 'pointer',
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    border: '2px solid rgba(255, 255, 255, 0.4)',
+                    '&:hover': {
+                      borderColor: 'rgba(255, 255, 255, 0.7)',
+                      transform: 'scale(1.1)',
+                      boxShadow: '0 0 20px rgba(255, 255, 255, 0.3)',
+                    },
+                  }}
+                >
+                  {myUser?.nickname?.charAt(0).toUpperCase() || 'U'}
+                </Avatar>
+              </>
+            ) : (
+              <>
+                {/* 비로그인 상태: 로그인 + 회원가입 */}
+                <Box
+                  onClick={() => navigate('/login')}
+                  sx={{
+                    px: 2.5,
+                    py: 1,
+                    fontSize: '0.875rem',
+                    fontWeight: 700,
+                    color: 'white',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease',
+                    '&:hover': {
+                      color: 'rgba(255, 255, 255, 0.8)',
+                    },
+                  }}
+                >
+                  로그인
+                </Box>
+                <Box
+                  onClick={() => navigate('/signup')}
+                  sx={{
+                    px: 2.5,
+                    py: 1,
+                    bgcolor: 'white',
+                    borderRadius: 3,
+                    fontSize: '0.875rem',
+                    fontWeight: 700,
+                    color: '#9333EA',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                    '&:hover': {
+                      bgcolor: 'white',
+                      transform: 'translateY(-2px) scale(1.02)',
+                      boxShadow: '0 6px 20px rgba(147, 51, 234, 0.3)',
+                      color: '#7C3AED',
+                    },
+                  }}
+                >
+                  회원가입
+                </Box>
+              </>
+            )}
           </Box>
         </Box>
 
@@ -271,21 +372,24 @@ const Header = ({ showSearchBar = false }: HeaderProps) => {
                     style={{ marginTop: 24 }}
                   >
                     <Box
+                      component="form"
+                      onSubmit={handleSearchSubmit}
                       sx={{
                         position: 'relative',
                         display: 'flex',
                         alignItems: 'center',
-                        bgcolor: 'rgba(16, 185, 129, 0.10)',
-                        borderRadius: 2,
+                        bgcolor: 'rgba(147, 51, 234, 0.1)',
+                        borderRadius: 3,
                         px: 2,
                         height: 40,
-                        transition: 'all 0.2s ease',
-                        border: '1px solid rgba(16, 185, 129, 0.35)',
+                        transition: 'all 0.3s ease',
+                        border: '1px solid rgba(147, 51, 234, 0.3)',
                         '&:focus-within': {
                           bgcolor: 'white',
-                          boxShadow: '0 0 0 2px rgba(16, 185, 129, 0.25)',
+                          boxShadow: '0 0 0 2px rgba(147, 51, 234, 0.4)',
+                          borderColor: 'rgba(147, 51, 234, 0.5)',
                           '& svg': {
-                            color: '#10B981',
+                            color: '#9333EA',
                           },
                           '& input': {
                             color: '#1F2937',
@@ -297,7 +401,7 @@ const Header = ({ showSearchBar = false }: HeaderProps) => {
                         pointerEvents: 'auto',
                       }}
                     >
-                      <Search size={18} color="#10B981" strokeWidth={2} />
+                      <Search size={18} color="#9333EA" strokeWidth={2} />
                       <InputBase
                         placeholder="검색"
                         sx={{
@@ -315,6 +419,12 @@ const Header = ({ showSearchBar = false }: HeaderProps) => {
                         onFocus={() => setSearchFocused(true)}
                         onBlur={() => setSearchFocused(false)}
                         inputRef={inputRef}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            // 강제 제출
+                            handleSearchSubmit(e as any);
+                          }
+                        }}
                       />
                     </Box>
                   </motion.div>
@@ -355,12 +465,12 @@ const Header = ({ showSearchBar = false }: HeaderProps) => {
             py: 1.5,
             px: 2,
             '&:hover': {
-              bgcolor: 'rgba(16, 185, 129, 0.08)',
+              bgcolor: 'rgba(147, 51, 234, 0.08)',
             },
           }}
         >
           <ListItemIcon>
-            <UserCircle size={20} color="#10B981" strokeWidth={2} />
+            <UserCircle size={20} color="#9333EA" strokeWidth={2} />
           </ListItemIcon>
           <ListItemText
             primary="마이페이지"

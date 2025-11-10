@@ -339,3 +339,129 @@ deploy_dev:
     # 원격 실행
     scp -q remote-dev.sh dev-host:/tmp/remote-dev.sh
     ssh dev-host "bash /tmp/remote-dev.sh && rm -f /tmp/remote-dev.sh"
+
+
+# ───────────────────────────────────────────────────────────
+# Memeduck Frontend (Vite) — master→PROD, develop→DEV
+#  - MR(대상 master/develop): 빌드만
+#  - master/develop push(=merge 포함): 빌드 후 배포
+# ───────────────────────────────────────────────────────────
+
+.variables_memeduck: &vars_memeduck
+  MD_FE_DIR: "md_frontend"
+
+# 공통 러너 태그
+.default_tags: &duckon_tags
+  tags: ["duckon","dind"]
+
+# 1) Build (MR/Push 모두)
+build_memeduck_front:
+  stage: build
+  <<: *duckon_tags
+  image: node:20-alpine
+  variables:
+    <<: *vars_memeduck
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"'
+    - if: '$CI_COMMIT_BRANCH == "master"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+  script:
+    - cd "$MD_FE_DIR"
+    - npm ci
+    - |
+      # 브랜치/타겟에 따라 API Base 설정
+      if [ "$CI_COMMIT_BRANCH" = "master" ] || [ "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" = "master" ]; then
+        API_BASE="${VITE_API_BASE_URL_MD_PROD:-/api}"
+      else
+        API_BASE="${VITE_API_BASE_URL_MD_DEV:-/api}"
+      fi
+      echo "VITE_API_BASE_URL_MD=$API_BASE"
+      VITE_API_BASE_URL_MD="$API_BASE" npm run build
+  artifacts:
+    paths:
+      - $MD_FE_DIR/dist
+    expire_in: 1 week
+
+# 2) Deploy to DEV (develop push/merge)
+deploy_memeduck_front_dev:
+  stage: deploy
+  <<: *duckon_tags
+  image:
+    name: amazon/aws-cli:2.17.60
+    entrypoint: ["/bin/bash","-lc"]
+  variables:
+    <<: *vars_memeduck
+  needs:
+    - job: build_memeduck_front
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop"'
+    - when: never
+  before_script:
+    - set -euo pipefail
+    - yum -y install jq
+    - '[ -n "$AWS_ACCESS_KEY_ID_PROD" ] || { echo "Missing AWS creds"; exit 1; }'
+    - '[ -n "$AWS_SECRET_ACCESS_KEY_PROD" ] || { echo "Missing AWS creds"; exit 1; }'
+    - '[ -n "$AWS_REGION_PROD" ] || { echo "Missing region"; exit 1; }'
+    - '[ -n "$S3_BUCKET_MD_FE_DEV" ] || { echo "Missing S3 bucket (DEV)"; exit 1; }'
+    - '[ -n "$CF_DISTRIBUTION_ID_MD_FE_DEV" ] || { echo "Missing CF dist id (DEV)"; exit 1; }'
+    - export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID_PROD"
+    - export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY_PROD"
+    - export AWS_DEFAULT_REGION="$AWS_REGION_PROD"
+  script: |
+    cd "$MD_FE_DIR/dist"
+    # 정적 리소스(HTML 제외)는 장기 캐시
+    aws s3 cp . "s3://$S3_BUCKET_MD_FE_DEV" --recursive \
+      --exclude "*.html" \
+      --cache-control "public,max-age=31536000,immutable"
+    # HTML은 no-cache
+    find . -name "*.html" -print0 | while IFS= read -r -d '' f; do
+      aws s3 cp "$f" "s3://$S3_BUCKET_MD_FE_DEV/${f#./}" \
+        --cache-control "no-cache" \
+        --content-type "text/html; charset=utf-8"
+    done
+    # CF 캐시 무효화
+    aws cloudfront create-invalidation \
+      --distribution-id "$CF_DISTRIBUTION_ID_MD_FE_DEV" \
+      --paths "/index.html" "/"
+
+# 3) Deploy to PROD (master push/merge)
+deploy_memeduck_front_prod:
+  stage: deploy
+  <<: *duckon_tags
+  image:
+    name: amazon/aws-cli:2.17.60
+    entrypoint: ["/bin/bash","-lc"]
+  variables:
+    <<: *vars_memeduck
+  needs:
+    - job: build_memeduck_front
+      artifacts: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"'
+    - when: never
+  before_script:
+    - set -euo pipefail
+    - yum -y install jq
+    - '[ -n "$AWS_ACCESS_KEY_ID_PROD" ] || { echo "Missing AWS creds"; exit 1; }'
+    - '[ -n "$AWS_SECRET_ACCESS_KEY_PROD" ] || { echo "Missing AWS creds"; exit 1; }'
+    - '[ -n "$AWS_REGION_PROD" ] || { echo "Missing region"; exit 1; }'
+    - '[ -n "$S3_BUCKET_MD_FE_PROD" ] || { echo "Missing S3 bucket (PROD)"; exit 1; }'
+    - '[ -n "$CF_DISTRIBUTION_ID_MD_FE_PROD" ] || { echo "Missing CF dist id (PROD)"; exit 1; }'
+    - export AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID_PROD"
+    - export AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY_PROD"
+    - export AWS_DEFAULT_REGION="$AWS_REGION_PROD"
+  script: |
+    cd "$MD_FE_DIR/dist"
+    aws s3 cp . "s3://$S3_BUCKET_MD_FE_PROD" --recursive \
+      --exclude "*.html" \
+      --cache-control "public,max-age=31536000,immutable"
+    find . -name "*.html" -print0 | while IFS= read -r -d '' f; do
+      aws s3 cp "$f" "s3://$S3_BUCKET_MD_FE_PROD/${f#./}" \
+        --cache-control "no-cache" \
+        --content-type "text/html; charset=utf-8"
+    done
+    aws cloudfront create-invalidation \
+      --distribution-id "$CF_DISTRIBUTION_ID_MD_FE_PROD" \
+      --paths "/index.html" "/"
