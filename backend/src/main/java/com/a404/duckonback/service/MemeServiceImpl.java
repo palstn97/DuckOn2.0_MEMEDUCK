@@ -34,6 +34,7 @@ public class MemeServiceImpl implements MemeService {
     private final MemeTagRepository memeTagRepository;
     private final UserRepository userRepository;
     private final MemeFavoriteRepository memeFavoriteRepository;
+    private final MemeHourlyTop10Repository memeHourlyTop10Repository;
 
     @Override
     public MemeCreateResponseDTO createMeme(Long userId, MemeCreateRequestDTO req) {
@@ -225,4 +226,49 @@ public class MemeServiceImpl implements MemeService {
                 .toList();
     }
 
+
+    @Override
+    @Transactional(readOnly = true)
+    public RandomMemeResponseDTO getHourlyTop10Memes() {
+        List<MemeHourlyTop10> topList = memeHourlyTop10Repository.findLatestTop10();
+
+        if (topList.isEmpty()) {
+            // 아직 집계 전이거나 로그 없음
+            return RandomMemeResponseDTO.builder()
+                    .page(1)
+                    .size(0)
+                    .total(0)
+                    .items(List.of())
+                    .build();
+        }
+
+        List<RandomMemeItemDTO> items = topList.stream()
+                .map(row -> {
+                    Meme meme = row.getMeme();
+
+                    List<String> tags = Optional.ofNullable(meme.getMemeTags())
+                            .orElseGet(Set::of)
+                            .stream()
+                            .map(mt -> mt.getTag() != null ? mt.getTag().getTagName() : null)
+                            .filter(Objects::nonNull)
+                            .distinct()
+                            .toList();
+
+                    return RandomMemeItemDTO.builder()
+                            .memeId(meme.getId())
+                            .memeUrl(meme.getImageUrl())
+                            .tags(tags)
+                            .build();
+                })
+                .toList();
+
+        int size = items.size();
+
+        return RandomMemeResponseDTO.builder()
+                .page(1)
+                .size(size)
+                .total(size)
+                .items(items)
+                .build();
+    }
 }

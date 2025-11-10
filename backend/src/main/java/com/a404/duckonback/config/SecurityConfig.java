@@ -57,7 +57,7 @@ public class SecurityConfig {
                 "https://www.memeduck.site",
                 "https://duckon.site",
                 "https://www.duckon.site",
-                "https://d3janh0vyc8he.cloudfront.net",
+                "https://d3jianh0vyc8he.cloudfront.net",
                 "http://ec2-43-202-159-100.ap-northeast-2.compute.amazonaws.com",
                 "http://localhost:3000",
                 "http://127.0.0.1:3000",
@@ -102,7 +102,8 @@ public class SecurityConfig {
                                         "/webjars/**",
                                         "/api/rooms/{roomId}/enter",
                                         "/ws-chat/**",
-                                        "/api/memes/random"
+                                        "/api/memes/random",
+                                        "/api/memes/top/hourly"
                                 ).permitAll()
 
                                 // 1) 인증 필요 API (특정 /me, /follow, PUT /follow)
