@@ -14,4 +14,5 @@ public interface MemeService {
     RandomMemeResponseDTO getTop10MemesByTotalUsage();
     List<MyMemeDTO> getMyMemes(Long userId, int page, int size);
 
+    MemeDetailDTO getMemeDetail(Long memeId);
 }
