@@ -103,3 +103,73 @@ export const getTopMemes = async (): Promise<TopMemesResponse> => {
   const response = await api.get<TopMemesResponse>('/memes/top/total');
   return response.data;
 }
+
+export async function fetchMemeDetail(memeId: number | string) {
+  const res = await api.get(`/memes/${memeId}/detail`);
+  return res.data.data;  
+}
+/**
+ * 밈 사용/다운로드 로그 기록 API
+ * POST /api/memes/usage
+ * 
+ * @param memeId - 밈 ID
+ * @param usageType - 사용 타입 ('USE' | 'DOWNLOAD')
+ * @returns 응답 데이터
+ */
+export interface MemeUsageRequest {
+  memeId: number;
+  usageType: 'USE' | 'DOWNLOAD';
+}
+
+export interface MemeUsageResponse {
+  status: number;
+  message: string;
+  data: string;
+}
+
+export const logMemeUsage = async (
+  memeId: number
+): Promise<MemeUsageResponse> => {
+  const response = await api.post<MemeUsageResponse>('/memes/usage', {
+    memeId,
+    usageType: 'DOWNLOAD',
+  });
+
+  return response.data;
+};
+
+/**
+ * 내가 만든 밈 목록 조회 API
+ * GET /api/memes/mine
+ * 
+ * @param page - 페이지 번호 (기본값: 1)
+ * @param size - 페이지 크기 (기본값: 10)
+ * @returns 내가 생성한 밈 목록
+ */
+export interface MyMemeItem {
+  memeId: number;
+  imageUrl: string;
+  createdAt: string;
+  usageCnt: number;
+  downloadCnt: number;
+}
+
+export interface MyMemesResponse {
+  status: number;
+  message: string;
+  data: MyMemeItem[];
+}
+
+export const getMyMemes = async (
+  page: number = 1,
+  size: number = 10
+): Promise<MyMemesResponse> => {
+  const response = await api.get<MyMemesResponse>('/memes/mine', {
+    params: {
+      page,
+      size,
+    },
+  });
+
+  return response.data;
+};
