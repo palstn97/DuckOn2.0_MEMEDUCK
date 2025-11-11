@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardMedia, Chip, IconButton, Box, Fade } from '@mui/material';
 import { Download, Star } from 'lucide-react';
+import { useUserStore } from '../../store/useUserStore';
+import LoginModal from '../common/LoginModal';
 
 interface MemeCardProps {
   id: string;
@@ -18,11 +20,19 @@ interface MemeCardProps {
 
 const MemeCard = ({ id, gifUrl, tags, isFavorite, onToggleFavorite }: MemeCardProps) => {
   const navigate = useNavigate();
+  const { myUser } = useUserStore();
   const [hover, setHover] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
 
   const handleDownload = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    // 로그인 체크
+    if (!myUser) {
+      setShowLoginModal(true);
+      return;
+    }
     
     try {
       // GIF 다운로드
@@ -45,7 +55,23 @@ const MemeCard = ({ id, gifUrl, tags, isFavorite, onToggleFavorite }: MemeCardPr
     navigate(`/memes/${id}`);
   };
 
+  const handleFavoriteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    // 로그인 체크
+    if (!myUser) {
+      setShowLoginModal(true);
+      return;
+    }
+    
+    // 로그인된 경우 즐겨찾기 토글
+    if (onToggleFavorite) {
+      onToggleFavorite(id);
+    }
+  };
+
   return (
+    <>
     <Card
       onClick={handleCardClick}
       onMouseEnter={() => setHover(true)}
@@ -94,10 +120,7 @@ const MemeCard = ({ id, gifUrl, tags, isFavorite, onToggleFavorite }: MemeCardPr
         {onToggleFavorite && (
           <Fade in={hover}>
             <IconButton
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleFavorite(id);
-              }}
+              onClick={handleFavoriteClick}
               sx={{
                 position: "absolute",
                 top: 12,
@@ -194,6 +217,10 @@ const MemeCard = ({ id, gifUrl, tags, isFavorite, onToggleFavorite }: MemeCardPr
         </Fade>
       </Box>
     </Card>
+    
+    {/* 로그인 모달 - Card 외부로 이동하여 이벤트 버블링 방지 */}
+    <LoginModal open={showLoginModal} onClose={() => setShowLoginModal(false)} />
+    </>
   );
 };
 
