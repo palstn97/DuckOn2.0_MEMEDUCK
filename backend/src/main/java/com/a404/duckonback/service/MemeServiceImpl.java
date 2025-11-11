@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -318,5 +319,45 @@ public class MemeServiceImpl implements MemeService {
                 .total(size)
                 .items(items)
                 .build();
+    }
+
+    @Override
+    public MemeDetailDTO getMemeDetail(Long memeId) {
+        Meme meme = memeRepository.findByIdWithCreatorAndTags(memeId)
+                .orElseThrow(() -> new CustomException("해당 밈을 찾을 수 없습니다.", HttpStatus.NOT_FOUND));
+
+        User creator = meme.getCreator();
+        MemeCreatorDTO creatorDTO = MemeCreatorDTO.builder()
+                .id(creator.getId())
+                .userId(creator.getUserId())
+                .nickname(creator.getNickname())
+                .imgUrl(creator.getImgUrl())
+                .build();
+
+        List<String> tags = meme.getMemeTags().stream()
+                .map(mt -> mt.getTag().getTagName())
+                .distinct()
+                .toList();
+
+        int favoriteCnt = (int) memeFavoriteRepository.countByMemeId(memeId);
+
+        return MemeDetailDTO.builder()
+                .memeId(meme.getId())
+                .imageUrl(meme.getImageUrl())
+                .createdAt(meme.getCreatedAt())
+                .usageCnt(meme.getUsageCnt())
+                .favoriteCnt(favoriteCnt)
+                .downloadCnt(meme.getDownloadCnt())
+                .creator(creatorDTO)
+                .tags(tags)
+                .build();
+    }
+
+    @Override
+    public List<MyMemeDTO> getMyMemes(Long userId, int page, int size) {
+        Pageable pageable = PageRequest.of(Math.max(page - 1, 0), size);
+        return memeRepository
+                .findMyMemesByCreatorIdOrderByCreatedAtDesc(userId, pageable)
+                .getContent();
     }
 }

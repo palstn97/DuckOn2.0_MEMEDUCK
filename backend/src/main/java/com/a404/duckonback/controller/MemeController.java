@@ -111,6 +111,8 @@ public class MemeController {
             @AuthenticationPrincipal CustomUserPrincipal principal,
             @PathVariable Long memeId
     ) {
+        if(principal == null) throw new CustomException("로그인이 필요합니다.", ErrorCode.USER_NOT_AUTHENTICATED);
+
         memeService.createFavorite(principal.getId(), memeId);
         return ResponseEntity.ok(ApiResponseDTO.success(SuccessCode.MEME_FAVORITE_CREATED, null));
     }
@@ -121,6 +123,8 @@ public class MemeController {
             @AuthenticationPrincipal CustomUserPrincipal principal,
             @PathVariable Long memeId
     ) {
+        if(principal == null) throw new CustomException("로그인이 필요합니다.", ErrorCode.USER_NOT_AUTHENTICATED);
+
         memeService.deleteFavorite(principal.getId(), memeId);
         return ResponseEntity.ok(ApiResponseDTO.success(SuccessCode.MEME_FAVORITE_DELETED, null));
     }
@@ -162,6 +166,33 @@ public class MemeController {
         return ResponseEntity.ok(
                 ApiResponseDTO.success(SuccessCode.MEME_TOP10_RETRIEVE_SUCCESS, res)
         );
+    }
+
+    @Operation(
+            summary = "밈 상세 조회",
+            description = "밈 기본정보, 태그 이름 리스트, 생성자 정보를 반환합니다."
+    )
+    @GetMapping("/{memeId}/detail")
+    public ResponseEntity<ApiResponseDTO<MemeDetailDTO>> getMemeDetail(
+            @PathVariable Long memeId
+    ) {
+        MemeDetailDTO detail = memeService.getMemeDetail(memeId);
+        return ResponseEntity.ok(ApiResponseDTO.success(SuccessCode.MEME_RETRIEVE_SUCCESS, detail));
+    }
+
+    @Operation(
+            summary = "내가 만든 밈 목록 조회",
+            description = "내가 생성한 밈을 최신순으로 조회합니다. 페이지네이션을 지원합니다."
+    )
+    @GetMapping("/mine")
+    public ResponseEntity<ApiResponseDTO<List<MyMemeDTO>>> getMyMemes(
+            @AuthenticationPrincipal CustomUserPrincipal principal,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int size
+    ) {
+        if (principal == null) throw new CustomException("로그인이 필요합니다.", ErrorCode.USER_NOT_AUTHENTICATED);
+        List<MyMemeDTO> myMemes = memeService.getMyMemes(principal.getId(), page, size);
+        return ResponseEntity.ok(ApiResponseDTO.success(SuccessCode.MEME_RETRIEVE_SUCCESS, myMemes));
     }
 
 
