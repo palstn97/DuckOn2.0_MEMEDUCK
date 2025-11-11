@@ -20,6 +20,25 @@ export const fetchTopMemes = async (): Promise<Meme[]> => {
   }));
 };
 
+// 인기(top10) 가져오기
+export const fetchRandomMemes = async (
+  page = 1,
+  size = 50
+): Promise<Meme[]> => {
+  const res = await api.get("/memes/random", {
+    params: { page, size },
+  });
+
+  const data = res.data?.data;
+  const items = data?.items ?? data?.content ?? []; // 혹시 Page<T>로 내려오면 content도 대비
+
+  return items.map((it: any) => ({
+    id: it.memeId,
+    imageUrl: it.memeUrl,
+    tags: it.tags,
+  }));
+};
+
 // 즐겨찾기 목록 (배열 그대로 오는 버전)
 export const fetchFavoriteMemes = async (): Promise<Meme[]> => {
   const res = await api.get("/memes/favorites");

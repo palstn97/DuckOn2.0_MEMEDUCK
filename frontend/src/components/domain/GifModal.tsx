@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from "react";
-import { X, Search, Sparkles, TrendingUp } from "lucide-react";
+import {useState, useEffect, useRef} from "react";
+import {X, Search, Sparkles, TrendingUp} from "lucide-react";
 import {
-  fetchTopMemes,
+  // fetchTopMemes,
   fetchFavoriteMemes,
+  fetchRandomMemes,
   searchMemes,
   logMemeUsage,
   type Meme,
@@ -14,7 +15,7 @@ type GifModalProps = {
   onSelectGif: (gifUrl: string) => void;
 };
 
-const GifModal = ({ isOpen, onClose, onSelectGif }: GifModalProps) => {
+const GifModal = ({isOpen, onClose, onSelectGif}: GifModalProps) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<"trending" | "favorites">("trending");
   const [memes, setMemes] = useState<Meme[]>([]);
@@ -38,7 +39,8 @@ const GifModal = ({ isOpen, onClose, onSelectGif }: GifModalProps) => {
     (async () => {
       setLoading(true);
       try {
-        const data = await fetchTopMemes();
+        // const data = await fetchTopMemes();
+        const data = await fetchRandomMemes();
         setMemes(data);
       } catch (e) {
         console.error("failed to load memes:", e);
@@ -50,28 +52,29 @@ const GifModal = ({ isOpen, onClose, onSelectGif }: GifModalProps) => {
   }, [isOpen]);
 
   // 탭 바뀔 때
-useEffect(() => {
-  if (!isOpen) return;
-  if (searchQuery.trim()) return;
+  useEffect(() => {
+    if (!isOpen) return;
+    if (searchQuery.trim()) return;
 
-  (async () => {
-    setLoading(true);
-    try {
-      if (activeTab === "trending") {
-        const data = await fetchTopMemes();
-        setMemes(data);
-      } else {
-        const data = await fetchFavoriteMemes();
-        setMemes(data);
+    (async () => {
+      setLoading(true);
+      try {
+        if (activeTab === "trending") {
+          // const data = await fetchTopMemes();
+          const data = await fetchRandomMemes();
+          setMemes(data);
+        } else {
+          const data = await fetchFavoriteMemes();
+          setMemes(data);
+        }
+      } catch (e) {
+        console.error("[GifModal] favorite fetch error:", e);
+        setMemes([]);
+      } finally {
+        setLoading(false);
       }
-    } catch (e) {
-      console.error("[GifModal] favorite fetch error:", e);
-      setMemes([]);
-    } finally {
-      setLoading(false);
-    }
-  })();
-}, [activeTab, isOpen, searchQuery]);
+    })();
+  }, [activeTab, isOpen, searchQuery]);
 
   // 검색
   useEffect(() => {
@@ -84,7 +87,8 @@ useEffect(() => {
         setLoading(true);
         try {
           if (activeTab === "trending") {
-            setMemes(await fetchTopMemes());
+            // setMemes(await fetchTopMemes());
+            setMemes(await fetchRandomMemes());
           } else {
             setMemes(await fetchFavoriteMemes());
           }
@@ -217,11 +221,10 @@ useEffect(() => {
                 onClick={() => setActiveTab("trending")}
                 className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
                           text-sm font-medium transition-all duration-200
-                          ${
-                            activeTab === "trending"
-                              ? "bg-purple-600 text-white shadow-lg shadow-purple-500/20"
-                              : "bg-gray-700/50 text-gray-400 hover:bg-gray-700 hover:text-gray-300"
-                          }`}
+                          ${activeTab === "trending"
+                    ? "bg-purple-600 text-white shadow-lg shadow-purple-500/20"
+                    : "bg-gray-700/50 text-gray-400 hover:bg-gray-700 hover:text-gray-300"
+                  }`}
               >
                 <TrendingUp size={16} />
                 인기
@@ -230,11 +233,10 @@ useEffect(() => {
                 onClick={() => setActiveTab("favorites")}
                 className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg
                           text-sm font-medium transition-all duration-200
-                          ${
-                            activeTab === "favorites"
-                              ? "bg-purple-600 text-white shadow-lg shadow-purple-500/20"
-                              : "bg-gray-700/50 text-gray-400 hover:bg-gray-700 hover:text-gray-300"
-                          }`}
+                          ${activeTab === "favorites"
+                    ? "bg-purple-600 text-white shadow-lg shadow-purple-500/20"
+                    : "bg-gray-700/50 text-gray-400 hover:bg-gray-700 hover:text-gray-300"
+                  }`}
               >
                 <Sparkles size={16} />
                 즐겨찾기
