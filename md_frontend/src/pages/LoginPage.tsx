@@ -16,7 +16,7 @@ const LoginPage = () => {
 
   const setUser = useUserStore((state) => state.setMyUser);
 
-  const API_BASE_URL = import.meta.env.VITE_OAUTH2_BASE_URL ?? "";
+  // const API_BASE_URL = import.meta.env.VITE_OAUTH2_BASE_URL ?? "";
 
   const handleLogin = async () => {
     setError("");
@@ -49,7 +49,7 @@ const LoginPage = () => {
       <LoginSignupCard>
         {/* 로고 & 문구 */}
         <div className="flex flex-col items-center gap-x-2 mb-10">
-          <img className="h-8" src="/logo.svg" alt="밈덕 로고" />
+          <img className="h-8" src="/duck.svg" alt="밈덕 로고" />
           <p className="text-sm text-gray-600 text-center">
             밈을 공유하고 즐기는 공간
           </p>
@@ -110,7 +110,7 @@ const LoginPage = () => {
           <div className="flex-grow h-px bg-gray-300" />
         </div>
         {/* Google 로그인 */}
-        <a
+        {/* <a
           href={`${API_BASE_URL}/oauth2/authorization/google`}
           className="w-full flex items-center justify-center gap-2 border border-gray-300 py-3 rounded-xl text-sm font-medium text-gray-700 mb-3 transition-colors hover:bg-gray-50"
         >
@@ -139,9 +139,9 @@ const LoginPage = () => {
             />
           </svg>
           Google로 계속하기
-        </a>
+        </a> */}
         {/* Kakao 로그인 */}
-        <a
+        {/* <a
           href={`${API_BASE_URL}/oauth2/authorization/kakao`}
           className="w-full flex items-center justify-center gap-2 bg-[#FEE500] py-3 rounded-xl text-sm font-medium text-black mb-3 transition-colors hover:bg-yellow-400"
         >
@@ -156,13 +156,12 @@ const LoginPage = () => {
             />
           </svg>
           카카오로 계속하기
-        </a>
+        </a> */}
         {/* Naver 로그인 */}
-        <a
+        {/* <a
           href={`${API_BASE_URL}/oauth2/authorization/naver`}
           className="w-full flex items-center justify-center gap-2 bg-[#03C75A] py-3 rounded-xl text-sm font-medium text-white transition-colors hover:bg-green-600"
         >
-          {/* Naver 로고 SVG */}
           <svg
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 24 24"
@@ -172,7 +171,7 @@ const LoginPage = () => {
             <path d="M4 4h5.5l5 6.5V4H20v16h-5.5l-5-6.5V20H4V4z" />
           </svg>
           네이버로 계속하기
-        </a>
+        </a> */}
         {/* 회원가입 안내 */}
         <p className="text-sm text-gray-500 text-center mt-2">
           계정이 없으신가요?{" "}

@@ -681,19 +681,21 @@
 
 // export default ChatPanel;
 
-
 // import { useState, useEffect, useRef } from "react";
 // import { Send, MoreVertical, UserX, LogOut } from "lucide-react";
 // import { Popover, Transition } from "@headlessui/react";
 // import { useUserStore } from "../../store/useUserStore";
 // import type { ChatMessage } from "../../types/chat";
 // import { blockUser } from "../../api/userService";
+// import GifModal from "../../components/domain/GifModal";
+// import NicknameWithRank from "../../components/common/NicknameWithRank";
 
 // type ChatPanelProps = {
 //   messages: ChatMessage[];
 //   sendMessage: (content: string) => Promise<void> | void;
 //   onBlockUser: (userId: string) => void;
-//   isHost?: boolean; // ✅ 방장 여부만 추가
+//   isHost?: boolean;
+//   onEjectUser?: (user: { id: string; nickname: string }) => void;
 // };
 
 // // 최근 메시지/이름 미리보기
@@ -780,6 +782,7 @@
 //   sendMessage,
 //   onBlockUser,
 //   isHost = false,
+//   onEjectUser,
 // }: ChatPanelProps) => {
 //   const { myUser } = useUserStore();
 //   const [newMessage, setNewMessage] = useState("");
@@ -793,13 +796,13 @@
 
 //   const [lastUnread, setLastUnread] = useState<ChatMessage | null>(null);
 
-//   // ✅ 차단 확인 모달
+//   // 차단 확인 모달
 //   const [blockConfirm, setBlockConfirm] = useState<{
 //     isOpen: boolean;
 //     user: { id: string; nickname: string } | null;
 //   }>({ isOpen: false, user: null });
 
-//   // ✅ 강퇴 확인 모달 (같은 ConfirmModal 쓸 거라 구조만 같게)
+//   // 강퇴 확인 모달
 //   const [ejectConfirm, setEjectConfirm] = useState<{
 //     isOpen: boolean;
 //     user: { id: string; nickname: string } | null;
@@ -810,7 +813,10 @@
 //   const [footerH, setFooterH] = useState(0);
 //   const [isMultiline, setIsMultiline] = useState(false);
 
-//   // ✅ 도배 감지용
+//   // GIF 모달 상태
+//   const [isGifModalOpen, setIsGifModalOpen] = useState(false);
+
+//   // 도배 감지용
 //   const [rateLimitedUntil, setRateLimitedUntil] = useState<number | null>(null);
 //   const pendingSendRef = useRef<{
 //     content: string;
@@ -916,7 +922,7 @@
 //     autoResize();
 //   }, [newMessage]);
 
-//   // ✅ 메시지 수신 시 pending 해제
+//   // 메시지 수신 시 pending 해제
 //   useEffect(() => {
 //     const pending = pendingSendRef.current;
 
@@ -932,14 +938,14 @@
 //       ) {
 //         pendingSendRef.current = null;
 //       } else if (messages.length > pending.msgCount) {
-//           pendingSendRef.current = null;
+//         pendingSendRef.current = null;
 //       }
 //     }
 
 //     lastMsgCountRef.current = messages.length;
 //   }, [messages, myUser?.userId]);
 
-//   // ✅ 배너 띄우는 공통 함수
+//   // 배너 띄우는 공통 함수
 //   const triggerRateLimited = (ms = 5000) => {
 //     const now = Date.now();
 //     setRateLimitedUntil(now + ms);
@@ -1005,12 +1011,12 @@
 //     }, 200);
 //   };
 
-//   // ✅ 차단 모달 열기
+//   // 차단 모달 열기
 //   const openBlockConfirm = (user: { id: string; nickname: string }) => {
 //     setBlockConfirm({ isOpen: true, user });
 //   };
 
-//   // ✅ 차단 확정
+//   // 차단 확정
 //   const confirmBlock = async () => {
 //     if (!blockConfirm.user) return;
 //     const id = blockConfirm.user.id;
@@ -1026,15 +1032,23 @@
 //     }
 //   };
 
-//   // ✅ 강퇴 모달 열기
+//   // 강퇴 모달 열기
 //   const openEjectConfirm = (user: { id: string; nickname: string }) => {
 //     setEjectConfirm({ isOpen: true, user });
 //   };
 
-//   // ✅ 강퇴 확인 (지금은 닫기만)
+//   // 강퇴 확인 → 부모 콜백 호출
 //   const confirmEject = () => {
-//     // 나중에 실제 강퇴 로직 연결
+//     if (ejectConfirm.user && onEjectUser) {
+//       onEjectUser(ejectConfirm.user);
+//     }
 //     setEjectConfirm({ isOpen: false, user: null });
+//   };
+
+//   // GIF 선택 핸들러
+//   const handleSelectGif = (gifUrl: string) => {
+//     sendMessage(gifUrl);
+//     setIsGifModalOpen(false);
 //   };
 
 //   const charCount = countGraphemes(newMessage);
@@ -1051,7 +1065,7 @@
 
 //   return (
 //     <>
-//       {/* ✅ 차단 모달 */}
+//       {/* 차단 모달 */}
 //       <ConfirmModal
 //         isOpen={blockConfirm.isOpen}
 //         onConfirm={confirmBlock}
@@ -1060,7 +1074,7 @@
 //         variant="block"
 //       />
 
-//       {/* ✅ 강퇴 모달 - 같은 컴포넌트, variant만 다름 */}
+//       {/* 강퇴 모달 */}
 //       <ConfirmModal
 //         isOpen={ejectConfirm.isOpen}
 //         onConfirm={confirmEject}
@@ -1069,8 +1083,15 @@
 //         variant="eject"
 //       />
 
+//       {/* GIF 모달 */}
+//       <GifModal
+//         isOpen={isGifModalOpen}
+//         onClose={() => setIsGifModalOpen(false)}
+//         onSelectGif={handleSelectGif}
+//       />
+
 //       <div className="relative flex flex-col h-full bg-gray-800 text-white">
-//         {/* ✅ 도배 안내 말풍선 */}
+//         {/* 도배 안내 말풍선 */}
 //         {isRateLimitedNow && (
 //           <div
 //             className="absolute left-1/2 -translate-x-1/2 z-[300] transition-opacity"
@@ -1112,6 +1133,15 @@
 //             const isMyMessage =
 //               String(msg.senderId ?? "") === String(myUser?.userId ?? "");
 
+//             // ✅ 게스트 판별
+//             const hasUserId = !!msg.senderId;
+//             // ✅ 로그인한 사람일 때만 기본 GREEN 사용
+//             const msgRankLevel = hasUserId
+//               ? (msg as any).rankLevel ||
+//                 (msg as any).userRank?.rankLevel ||
+//                 "GREEN"
+//               : undefined;
+
 //             return (
 //               <div
 //                 key={uniqueKey}
@@ -1119,8 +1149,17 @@
 //                   isMyMessage ? "items-end" : "items-start"
 //                 }`}
 //               >
-//                 <span className="text-xs text-gray-500 mb-1">
-//                   {msg.senderNickName}
+//                 {/* 닉네임 + (로그인 유저만 뱃지) */}
+//                 <span className="text-xs text-gray-200 mb-1">
+//                   {hasUserId && msgRankLevel ? (
+//                     <NicknameWithRank
+//                       nickname={msg.senderNickName}
+//                       rankLevel={msgRankLevel}
+//                       badgeSize={18}
+//                     />
+//                   ) : (
+//                     msg.senderNickName
+//                   )}
 //                 </span>
 
 //                 <div
@@ -1162,7 +1201,7 @@
 //                           >
 //                             <Popover.Panel className="absolute z-10 top-0 left-full ml-2 w-40 bg-gray-600 border border-gray-500 rounded-lg shadow-lg">
 //                               <div className="flex flex-col p-1">
-//                                 {/* ✅ 방장일 때만 강퇴 노출 */}
+//                                 {/* 방장일 때만 강퇴 노출 */}
 //                                 {isHost && (
 //                                   <button
 //                                     onClick={() =>
@@ -1180,7 +1219,7 @@
 //                                   </button>
 //                                 )}
 
-//                                 {/* ✅ 공통: 차단하기 */}
+//                                 {/* 공통: 차단하기 */}
 //                                 <button
 //                                   onClick={() =>
 //                                     openBlockConfirm({
@@ -1226,7 +1265,7 @@
 //                           >
 //                             <Popover.Panel className="absolute z-10 top-0 left-full ml-2 w-40 bg-gray-600 border border-gray-500 rounded-lg shadow-lg">
 //                               <div className="flex flex-col p-1">
-//                                 {/* ✅ 방장일 때만 강퇴 노출 */}
+//                                 {/* 방장일 때만 강퇴 노출 */}
 //                                 {isHost && (
 //                                   <button
 //                                     onClick={() =>
@@ -1244,7 +1283,7 @@
 //                                   </button>
 //                                 )}
 
-//                                 {/* ✅ 공통: 차단하기 */}
+//                                 {/* 공통: 차단하기 */}
 //                                 <button
 //                                   onClick={() =>
 //                                     openBlockConfirm({
@@ -1360,6 +1399,23 @@
 //                 disabled={isRateLimitedNow}
 //               />
 
+//               {/* GIF 버튼 */}
+//               <button
+//                 type="button"
+//                 onClick={() => setIsGifModalOpen(!isGifModalOpen)}
+//                 disabled={isRateLimitedNow}
+//                 className="w-9 h-9 rounded-lg flex items-center justify-center
+//                           bg-gray-600 hover:bg-gray-500 transition-colors
+//                           disabled:bg-gray-700 disabled:cursor-not-allowed
+//                           shrink-0 text-xs font-medium text-white leading-tight"
+//                 aria-label="GIF 선택"
+//               >
+//                 <div className="text-center">
+//                   <div>GIF</div>
+//                 </div>
+//               </button>
+
+//               {/* 전송 버튼 */}
 //               <button
 //                 type="button"
 //                 tabIndex={-1}
@@ -1431,7 +1487,6 @@
 
 // export default ChatPanel;
 
-
 import { useState, useEffect, useRef } from "react";
 import { Send, MoreVertical, UserX, LogOut } from "lucide-react";
 import { Popover, Transition } from "@headlessui/react";
@@ -1439,13 +1494,13 @@ import { useUserStore } from "../../store/useUserStore";
 import type { ChatMessage } from "../../types/chat";
 import { blockUser } from "../../api/userService";
 import GifModal from "../../components/domain/GifModal";
+import NicknameWithRank from "../../components/common/NicknameWithRank";
 
 type ChatPanelProps = {
   messages: ChatMessage[];
   sendMessage: (content: string) => Promise<void> | void;
   onBlockUser: (userId: string) => void;
-  isHost?: boolean; // ✅ 방장 여부만 추가
-  /** ✅ 추가: 실제 강퇴 API 호출을 부모에 위임 */
+  isHost?: boolean;
   onEjectUser?: (user: { id: string; nickname: string }) => void;
 };
 
@@ -1547,13 +1602,13 @@ const ChatPanel = ({
 
   const [lastUnread, setLastUnread] = useState<ChatMessage | null>(null);
 
-  // ✅ 차단 확인 모달
+  // 차단 확인 모달
   const [blockConfirm, setBlockConfirm] = useState<{
     isOpen: boolean;
     user: { id: string; nickname: string } | null;
   }>({ isOpen: false, user: null });
 
-  // ✅ 강퇴 확인 모달
+  // 강퇴 확인 모달
   const [ejectConfirm, setEjectConfirm] = useState<{
     isOpen: boolean;
     user: { id: string; nickname: string } | null;
@@ -1564,10 +1619,10 @@ const ChatPanel = ({
   const [footerH, setFooterH] = useState(0);
   const [isMultiline, setIsMultiline] = useState(false);
 
-  // ✅ GIF 모달 상태
+  // GIF 모달 상태
   const [isGifModalOpen, setIsGifModalOpen] = useState(false);
 
-  // ✅ 도배 감지용
+  // 도배 감지용
   const [rateLimitedUntil, setRateLimitedUntil] = useState<number | null>(null);
   const pendingSendRef = useRef<{
     content: string;
@@ -1673,7 +1728,7 @@ const ChatPanel = ({
     autoResize();
   }, [newMessage]);
 
-  // ✅ 메시지 수신 시 pending 해제
+  // 메시지 수신 시 pending 해제
   useEffect(() => {
     const pending = pendingSendRef.current;
 
@@ -1696,7 +1751,7 @@ const ChatPanel = ({
     lastMsgCountRef.current = messages.length;
   }, [messages, myUser?.userId]);
 
-  // ✅ 배너 띄우는 공통 함수
+  // 배너 띄우는 공통 함수
   const triggerRateLimited = (ms = 5000) => {
     const now = Date.now();
     setRateLimitedUntil(now + ms);
@@ -1762,12 +1817,12 @@ const ChatPanel = ({
     }, 200);
   };
 
-  // ✅ 차단 모달 열기
+  // 차단 모달 열기
   const openBlockConfirm = (user: { id: string; nickname: string }) => {
     setBlockConfirm({ isOpen: true, user });
   };
 
-  // ✅ 차단 확정
+  // 차단 확정
   const confirmBlock = async () => {
     if (!blockConfirm.user) return;
     const id = blockConfirm.user.id;
@@ -1783,12 +1838,12 @@ const ChatPanel = ({
     }
   };
 
-  // ✅ 강퇴 모달 열기
+  // 강퇴 모달 열기
   const openEjectConfirm = (user: { id: string; nickname: string }) => {
     setEjectConfirm({ isOpen: true, user });
   };
 
-  // ✅ 강퇴 확인 → 부모 콜백 호출
+  // 강퇴 확인 → 부모 콜백 호출
   const confirmEject = () => {
     if (ejectConfirm.user && onEjectUser) {
       onEjectUser(ejectConfirm.user);
@@ -1796,7 +1851,7 @@ const ChatPanel = ({
     setEjectConfirm({ isOpen: false, user: null });
   };
 
-  // ✅ GIF 선택 핸들러
+  // GIF 선택 핸들러
   const handleSelectGif = (gifUrl: string) => {
     sendMessage(gifUrl);
     setIsGifModalOpen(false);
@@ -1816,7 +1871,7 @@ const ChatPanel = ({
 
   return (
     <>
-      {/* ✅ 차단 모달 */}
+      {/* 차단 모달 */}
       <ConfirmModal
         isOpen={blockConfirm.isOpen}
         onConfirm={confirmBlock}
@@ -1825,7 +1880,7 @@ const ChatPanel = ({
         variant="block"
       />
 
-      {/* ✅ 강퇴 모달 - 같은 컴포넌트, variant만 다름 */}
+      {/* 강퇴 모달 */}
       <ConfirmModal
         isOpen={ejectConfirm.isOpen}
         onConfirm={confirmEject}
@@ -1834,7 +1889,7 @@ const ChatPanel = ({
         variant="eject"
       />
 
-      {/* ✅ GIF 모달 */}
+      {/* GIF 모달 */}
       <GifModal
         isOpen={isGifModalOpen}
         onClose={() => setIsGifModalOpen(false)}
@@ -1842,7 +1897,7 @@ const ChatPanel = ({
       />
 
       <div className="relative flex flex-col h-full bg-gray-800 text-white">
-        {/* ✅ 도배 안내 말풍선 */}
+        {/* 도배 안내 말풍선 */}
         {isRateLimitedNow && (
           <div
             className="absolute left-1/2 -translate-x-1/2 z-[300] transition-opacity"
@@ -1884,6 +1939,11 @@ const ChatPanel = ({
             const isMyMessage =
               String(msg.senderId ?? "") === String(myUser?.userId ?? "");
 
+            // 실제로 랭크가 내려왔는지만 본다
+            const rawRankLevel =
+              (msg as any).rankLevel || (msg as any).userRank?.rankLevel;
+            const hasRank = !!rawRankLevel;
+
             return (
               <div
                 key={uniqueKey}
@@ -1891,8 +1951,17 @@ const ChatPanel = ({
                   isMyMessage ? "items-end" : "items-start"
                 }`}
               >
-                <span className="text-xs text-gray-500 mb-1">
-                  {msg.senderNickName}
+                {/* 닉네임 + (랭크가 실제로 왔을 때만 뱃지) */}
+                <span className="text-xs text-gray-200 mb-1">
+                  {hasRank ? (
+                    <NicknameWithRank
+                      nickname={msg.senderNickName}
+                      rankLevel={rawRankLevel}
+                      badgeSize={18}
+                    />
+                  ) : (
+                    msg.senderNickName
+                  )}
                 </span>
 
                 <div
@@ -1934,7 +2003,7 @@ const ChatPanel = ({
                           >
                             <Popover.Panel className="absolute z-10 top-0 left-full ml-2 w-40 bg-gray-600 border border-gray-500 rounded-lg shadow-lg">
                               <div className="flex flex-col p-1">
-                                {/* ✅ 방장일 때만 강퇴 노출 */}
+                                {/* 방장일 때만 강퇴 노출 */}
                                 {isHost && (
                                   <button
                                     onClick={() =>
@@ -1952,7 +2021,7 @@ const ChatPanel = ({
                                   </button>
                                 )}
 
-                                {/* ✅ 공통: 차단하기 */}
+                                {/* 공통: 차단하기 */}
                                 <button
                                   onClick={() =>
                                     openBlockConfirm({
@@ -1998,7 +2067,7 @@ const ChatPanel = ({
                           >
                             <Popover.Panel className="absolute z-10 top-0 left-full ml-2 w-40 bg-gray-600 border border-gray-500 rounded-lg shadow-lg">
                               <div className="flex flex-col p-1">
-                                {/* ✅ 방장일 때만 강퇴 노출 */}
+                                {/* 방장일 때만 강퇴 노출 */}
                                 {isHost && (
                                   <button
                                     onClick={() =>
@@ -2016,7 +2085,7 @@ const ChatPanel = ({
                                   </button>
                                 )}
 
-                                {/* ✅ 공통: 차단하기 */}
+                                {/* 공통: 차단하기 */}
                                 <button
                                   onClick={() =>
                                     openBlockConfirm({
@@ -2144,8 +2213,7 @@ const ChatPanel = ({
                 aria-label="GIF 선택"
               >
                 <div className="text-center">
-                  <div>me</div>
-                  <div>me</div>
+                  <div>GIF</div>
                 </div>
               </button>
 

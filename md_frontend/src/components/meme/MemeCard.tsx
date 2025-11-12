@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardMedia, Chip, IconButton, Box, Fade } from '@mui/material';
-import { Download } from 'lucide-react';
+import { Download, Star } from 'lucide-react';
+import { useUserStore } from '../../store/useUserStore';
+import LoginModal from '../common/LoginModal';
+import { logMemeUsage } from '../../api/memeService';
 
 interface MemeCardProps {
   id: string;
@@ -10,17 +13,32 @@ interface MemeCardProps {
   viewCount: number;
   likeCount: number;
   isLiked?: boolean;
+
+  // 즐겨찾기용 prop 추가하기
+  isFavorite?: boolean;
+  onToggleFavorite?: (id: string) => void;
 }
 
-const MemeCard = ({ id, gifUrl, tags }: MemeCardProps) => {
+const MemeCard = ({ id, gifUrl, tags, isFavorite, onToggleFavorite }: MemeCardProps) => {
   const navigate = useNavigate();
+  const { myUser } = useUserStore();
   const [hover, setHover] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
 
   const handleDownload = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     
+    // 로그인 체크
+    if (!myUser) {
+      setShowLoginModal(true);
+      return;
+    }
+    
     try {
+      // 다운로드 로그 기록
+      await logMemeUsage(Number(id));
+      
       // GIF 다운로드
       const response = await fetch(gifUrl);
       const blob = await response.blob();
@@ -41,7 +59,23 @@ const MemeCard = ({ id, gifUrl, tags }: MemeCardProps) => {
     navigate(`/memes/${id}`);
   };
 
+  const handleFavoriteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    // 로그인 체크
+    if (!myUser) {
+      setShowLoginModal(true);
+      return;
+    }
+    
+    // 로그인된 경우 즐겨찾기 토글
+    if (onToggleFavorite) {
+      onToggleFavorite(id);
+    }
+  };
+
   return (
+    <>
     <Card
       onClick={handleCardClick}
       onMouseEnter={() => setHover(true)}
@@ -85,6 +119,31 @@ const MemeCard = ({ id, gifUrl, tags }: MemeCardProps) => {
             }}
           />
         </Fade>
+
+        {/* 즐겨찾기 버튼 */}
+        {onToggleFavorite && (
+          <Fade in={hover}>
+            <IconButton
+              onClick={handleFavoriteClick}
+              sx={{
+                position: "absolute",
+                top: 12,
+                right: 60,
+                bgcolor: "rgba(0,0,0,0.35)",
+                "&:hover": {
+                  bgcolor: "rgba(0,0,0,0.6)",
+                },
+              }}
+            >
+              <Star
+                size={18}
+                strokeWidth={2.5}
+                color={isFavorite ? "#facc15" : "white"}
+                fill={isFavorite ? "#facc15" : "transparent"}
+              />
+            </IconButton>
+          </Fade>
+        )}
 
         {/* 다운로드 버튼 */}
         <Fade in={hover}>
@@ -162,6 +221,10 @@ const MemeCard = ({ id, gifUrl, tags }: MemeCardProps) => {
         </Fade>
       </Box>
     </Card>
+    
+    {/* 로그인 모달 - Card 외부로 이동하여 이벤트 버블링 방지 */}
+    <LoginModal open={showLoginModal} onClose={() => setShowLoginModal(false)} />
+    </>
   );
 };
 
