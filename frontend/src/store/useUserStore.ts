@@ -110,7 +110,6 @@
 // );
 
 
-// // store/useUserStore.ts
 // import { create } from "zustand";
 // import { persist } from "zustand/middleware";
 // import type { User } from "../types";
@@ -133,8 +132,8 @@
 // };
 
 // type UserState = {
-//   myUser: User | null;               // 내 정보
-//   otherUser: User | null;            // 타 유저 정보
+//   myUser: User | null; // 내 정보
+//   otherUser: User | null; // 타 유저 정보
 //   setMyUser: (user: User | null) => void;
 //   setOtherUser: (user: User | null) => void;
 
@@ -162,6 +161,17 @@
 //           const prev = state.myUser as any;
 //           const uid = (user as any).userId ?? prev?.userId;
 //           const incomingImg = (user as any).imgUrl;
+
+//           // --- guest 유저라면 guest id를 세션에 저장해서 채팅에서 재사용 ---
+//           if (uid && String(uid).startsWith("guest:")) {
+//             try {
+//               if (typeof window !== "undefined") {
+//                 sessionStorage.setItem("duckon_guest_id", String(uid));
+//               }
+//             } catch {
+//               // 세션 접근 불가한 환경이면 그냥 무시
+//             }
+//           }
 
 //           // 유효한 imgUrl이 오면 그대로, 아니면 이전/캐시 이미지로 복구
 //           const fallbackImg = prev?.imgUrl ?? loadLastImg(uid);
@@ -204,6 +214,13 @@
 //         localStorage.removeItem("refreshToken");
 //         emitTokenRefreshed(null);
 //         // last-img 캐시는 남겨둠(다음 로그인 복원용)
+//         try {
+//           if (typeof window !== "undefined") {
+//             sessionStorage.removeItem("duckon_guest_id");
+//           }
+//         } catch {
+//           // 세션 접근 불가면 무시
+//         }
 //         set({ myUser: null, otherUser: null, blockedSet: new Set() });
 //       },
 //     }),
@@ -347,9 +364,23 @@ export const useUserStore = create<UserState>()(
       }),
       merge: (persisted, current) => {
         const p = persisted as any;
+
+        // 토큰이 없으면 myUser는 복원하지 않음 (비로그인 시 예전 유저로 인식되는 문제 방지)
+        let hasToken = false;
+        try {
+          if (typeof window !== "undefined") {
+            hasToken = !!localStorage.getItem("accessToken");
+          }
+        } catch {
+          hasToken = false;
+        }
+
+        const safeMyUser = hasToken ? p?.myUser ?? null : null;
+
         return {
           ...current,
           ...p,
+          myUser: safeMyUser,
           blockedSet: new Set(p?.blockedSet ?? []), // Set 복원
         } as UserState;
       },

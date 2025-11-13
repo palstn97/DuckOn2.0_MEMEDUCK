@@ -796,7 +796,9 @@
 
 //   useEffect(() => {
 //     if (myUser?.userId && myUser.userId.startsWith("guest:")) {
-//       sessionStorage.setItem("duckon_guest_id", myUser.userId);
+//       if (typeof window !== "undefined") {
+//         sessionStorage.setItem("duckon_guest_id", myUser.userId);
+//       }
 //       setGuestId(myUser.userId);
 //     }
 //   }, [myUser?.userId]);
@@ -830,6 +832,9 @@
 //   // GIF 모달 상태
 //   const [isGifModalOpen, setIsGifModalOpen] = useState(false);
 
+//   // 게스트가 GIF 클릭 시 띄울 안내 말풍선
+//   const [showGifGuestModal, setShowGifGuestModal] = useState(false);
+
 //   // 도배 감지용
 //   const [rateLimitedUntil, setRateLimitedUntil] = useState<number | null>(null);
 //   const pendingSendRef = useRef<{
@@ -841,6 +846,7 @@
 //   const lastMsgCountRef = useRef<number>(messages.length);
 
 //   const isLoggedIn = !!myUser?.userId;
+//   const isGuest = !myUser;
 
 //   // footer 높이 추적
 //   useEffect(() => {
@@ -874,7 +880,21 @@
 //     }
 //   };
 
-//   // 메시지 들어올 때 처리 (원본 messages 기준으로 unread 처리 유지)
+//   // ✅ DEBUG: 마지막 메시지 senderId / userId 찍기
+//   useEffect(() => {
+//     if (!messages.length) return;
+//     const last = messages[messages.length - 1];
+//     const rawSender = (last as any).senderId;
+//     const rawUserId = (last as any).userId;
+
+//     console.log("[CHAT DEBUG] last message", {
+//       senderId: rawSender,
+//       userId: rawUserId,
+//       content: last.content,
+//     });
+//   }, [messages]);
+
+//   // 메시지 들어올 때 처리 (unread + guest id 학습)
 //   useEffect(() => {
 //     const addedCount = messages.length - prevLenRef.current;
 
@@ -886,8 +906,33 @@
 //         return;
 //       }
 
-//       const fromMe =
-//         String(last?.senderId ?? "") === String(myUser?.userId ?? "");
+//       const myIdNow = String(myUser?.userId ?? guestId ?? "");
+//       const lastSenderId = String(
+//         (last as any).senderId ?? (last as any).userId ?? ""
+//       );
+
+//       let fromMe = false;
+
+//       if (myIdNow && lastSenderId && myIdNow === lastSenderId) {
+//         fromMe = true;
+//       } else if (
+//         !myIdNow &&
+//         lastSenderId &&
+//         pendingSendRef.current &&
+//         pendingSendRef.current.content === last.content
+//       ) {
+//         // 아직 내 id를 모르는 guest인데,
+//         // 내가 방금 보낸 메시지와 내용이 같다면 이건 내 메시지라고 보고 id를 학습
+//         fromMe = true;
+//         setGuestId(lastSenderId);
+//         try {
+//           if (typeof window !== "undefined") {
+//             sessionStorage.setItem("duckon_guest_id", lastSenderId);
+//           }
+//         } catch {
+//           // 세션 접근 불가시 무시
+//         }
+//       }
 
 //       requestAnimationFrame(() => {
 //         requestAnimationFrame(() => {
@@ -909,7 +954,7 @@
 //     }
 
 //     prevLenRef.current = messages.length;
-//   }, [messages.length, myUser?.userId]);
+//   }, [messages.length, myUser?.userId, guestId, messages]);
 
 //   // 첫 로드시 맨 아래로
 //   useEffect(() => {
@@ -947,28 +992,41 @@
 //         pending.self &&
 //         last &&
 //         myUser?.userId &&
-//         String(last.senderId) === String(myUser.userId) &&
+//         String(
+//           (last as any).senderId ?? (last as any).userId ?? ""
+//         ) === String(myUser.userId) &&
 //         last.content === pending.content
 //       ) {
+//         // 내가 보낸 메시지가 서버에서 돌아온 걸 확인 → pending 해제
 //         pendingSendRef.current = null;
-//       } else if (messages.length > pending.msgCount) {
+//       } else if (pending.self && messages.length > pending.msgCount) {
+//         // ✅ 로그인 유저일 때만 백업 제거 로직 사용
 //         pendingSendRef.current = null;
 //       }
+//       // ✅ 게스트(pending.self === false)는 pending 유지해서 위쪽 useEffect에서 guestId 학습
 //     }
 
 //     lastMsgCountRef.current = messages.length;
 //   }, [messages, myUser?.userId]);
 
-//   // 배너 띄우는 공통 함수
+//   // 도배 배너용
 //   const triggerRateLimited = (ms = 5000) => {
 //     const now = Date.now();
 //     setRateLimitedUntil(now + ms);
 //   };
 
+//   const URL_REGEX = /^https?:\/\//i;
+//   const GIF_URL_REGEX = /\.gif(\?|#|$)/i;
+
 //   const handleSendMessage = () => {
 //     const v = newMessage.trim();
 //     if (!v) return;
 //     if (countGraphemes(newMessage) > MAX_LEN) return;
+
+//     // 익명 사용자는 URL / GIF URL 전송 금지
+//     if (isGuest && (URL_REGEX.test(v) || GIF_URL_REGEX.test(v))) {
+//       return;
+//     }
 
 //     const now = Date.now();
 //     const isRateLimitedNow =
@@ -1012,32 +1070,35 @@
 //       }
 //     });
 
-//     setTimeout(() => {
-//       const pendingNow = pendingSendRef.current;
-//       if (!pendingNow) return;
-//       if (
-//         pendingNow.at === sentAt &&
-//         lastMsgCountRef.current === pendingNow.msgCount
-//       ) {
-//         triggerRateLimited();
-//         pendingSendRef.current = null;
-//       }
-//     }, 200);
+//     // 🔥 로그인 유저에게만 백업 타이머 적용 (게스트는 guestId 학습까지 pending 유지)
+//     if (isLoggedIn) {
+//       setTimeout(() => {
+//         const pendingNow = pendingSendRef.current;
+//         if (!pendingNow) return;
+//         if (
+//           pendingNow.at === sentAt &&
+//           lastMsgCountRef.current === pendingNow.msgCount
+//         ) {
+//           triggerRateLimited();
+//           pendingSendRef.current = null;
+//         }
+//       }, 200);
+//     }
 //   };
 
-//   // ---- 차단 필터: 렌더 직전에 숨김 처리 (ID 문자열화로 유형 불일치 방지) ----
+//   // ---- 차단 필터 ----
 //   const visibleMessages = useMemo(
 //     () =>
-//       (Array.isArray(messages) ? messages : []).filter(
-//         (m) =>
-//           !blockedSet.has(
-//             String((m as any).senderId ?? (m as any).userId ?? "")
-//           )
-//       ),
+//       (Array.isArray(messages) ? messages : []).filter((m) => {
+//         const senderId = String(
+//           (m as any).senderId ?? (m as any).userId ?? ""
+//         );
+//         return !blockedSet.has(senderId);
+//       }),
 //     [messages, blockedSet]
 //   );
 
-//   // 차단/해제 직후 UX 보강: 맨 아래로 붙이고 배지/상태 초기화
+//   // 차단/해제 직후 UX 보강
 //   useEffect(() => {
 //     requestAnimationFrame(() => {
 //       scrollToBottom("auto");
@@ -1052,15 +1113,15 @@
 //     setBlockConfirm({ isOpen: true, user });
 //   };
 
-//   // 차단 확정: 서버 반영 → 부모콜백(로컬 반영) → 재동기화
+//   // 차단 확정
 //   const confirmBlock = async () => {
 //     if (!blockConfirm.user) return;
 //     const id = String(blockConfirm.user.id);
 
 //     try {
-//       const res = await blockUser(id); // 1) 서버 반영
-//       onBlockUser(id); // 2) 로컬 즉시 반영 (부모 콜백이 blockLocal 호출)
-//       refreshBlockedList().catch(() => {}); // 3) 서버 목록 재동기화 (fire-and-forget)
+//       const res = await blockUser(id);
+//       onBlockUser(id);
+//       refreshBlockedList().catch(() => {});
 //       console.log(res.message);
 //     } catch (err) {
 //       console.error("차단 실패:", err);
@@ -1074,7 +1135,7 @@
 //     setEjectConfirm({ isOpen: true, user });
 //   };
 
-//   // 강퇴 확인 → 부모 콜백 호출
+//   // 강퇴 확정
 //   const confirmEject = () => {
 //     if (ejectConfirm.user && onEjectUser) {
 //       onEjectUser(ejectConfirm.user);
@@ -1082,8 +1143,20 @@
 //     setEjectConfirm({ isOpen: false, user: null });
 //   };
 
+//   // 게스트 GIF 안내 말풍선 3초 뒤 자동 닫힘
+//   useEffect(() => {
+//     if (!showGifGuestModal) return;
+//     const timer = setTimeout(() => setShowGifGuestModal(false), 3000);
+//     return () => clearTimeout(timer);
+//   }, [showGifGuestModal]);
+
 //   // GIF 선택 핸들러
 //   const handleSelectGif = (gifUrl: string) => {
+//     if (isGuest) {
+//       setIsGifModalOpen(false);
+//       setShowGifGuestModal(true);
+//       return;
+//     }
 //     sendMessage(gifUrl);
 //     setIsGifModalOpen(false);
 //   };
@@ -1099,6 +1172,8 @@
 
 //   const isRateLimitedNow =
 //     rateLimitedUntil !== null && Date.now() < rateLimitedUntil;
+
+//   const myId = String(myUser?.userId ?? guestId ?? "");
 
 //   return (
 //     <>
@@ -1128,7 +1203,7 @@
 //       />
 
 //       <div className="relative flex flex-col h-full bg-gray-800 text-white">
-//         {/* 도배 안내 말풍선 */}
+//         {/* 도배 안내 말풍선 (기존 코드 그대로) */}
 //         {isRateLimitedNow && (
 //           <div
 //             className="absolute left-1/2 -translate-x-1/2 z-[300] transition-opacity"
@@ -1139,6 +1214,32 @@
 //           >
 //             <div className="bg-red-500 text-white text-sm md:text-base px-5 py-2 rounded-2xl shadow-lg border border-red-300 flex items-center gap-2 whitespace-nowrap justify-center">
 //               ⚠️ 채팅 도배로 5초간 채팅이 제한됩니다.
+//             </div>
+//           </div>
+//         )}
+
+//         {/* 게스트 GIF 사용 제한 안내 말풍선 */}
+//         {showGifGuestModal && (
+//           <div
+//             className="absolute left-1/2 -translate-x-1/2 z-[300] transition-opacity"
+//             style={{
+//               bottom: (footerH || 88) + 12,
+//               maxWidth: "92%",
+//             }}
+//           >
+//             <div
+//               className=" 
+//               flex items-center gap-2 justify-center
+//               px-5 py-2
+//               rounded-2xl
+//               bg-gradient-to-r from-purple-600 via-purple-500 to-fuchsia-500
+//               text-white text-sm md:text-base font-semibold tracking-tight
+//               shadow-lg
+//               border border-purple-300/40
+//               whitespace-nowrap
+//             "
+//             >
+//               로그인한 유저만 밈을 사용할 수 있습니다!
 //             </div>
 //           </div>
 //         )}
@@ -1166,12 +1267,13 @@
 //               );
 //             }
 
-//             const uniqueKey = `${msg.senderId}-${(msg as any).sentAt || index}`;
-//             const myId = myUser?.userId ?? guestId;
+//             const senderId = String(
+//               (msg as any).senderId ?? (msg as any).userId ?? ""
+//             );
+//             const uniqueKey = `${senderId}-${(msg as any).sentAt || index}`;
 //             const isMyMessage =
-//               String(msg.senderId ?? "") === String(myId ?? "");
+//               senderId !== "" && myId !== "" && senderId === myId;
 
-//             // 실제로 랭크가 내려왔는지만 본다
 //             const rawRankLevel =
 //               (msg as any).rankLevel || (msg as any).userRank?.rankLevel;
 //             const hasRank = !!rawRankLevel;
@@ -1183,7 +1285,7 @@
 //                   isMyMessage ? "items-end" : "items-start"
 //                 }`}
 //               >
-//                 {/* 닉네임 + (랭크가 실제로 왔을 때만 뱃지) */}
+//                 {/* 닉네임 + 랭크 */}
 //                 <span className="text-xs text-gray-200 mb-1">
 //                   {hasRank ? (
 //                     <NicknameWithRank
@@ -1197,7 +1299,7 @@
 //                 </span>
 
 //                 <div
-//                   className={`group relative flex items-end gap-2 max-w-[85%] ${
+//                   className={`group relative flex items-end gap-1 max-w-[90%] ${
 //                     isMyMessage ? "flex-row-reverse" : "flex-row"
 //                   }`}
 //                 >
@@ -1235,12 +1337,11 @@
 //                           >
 //                             <Popover.Panel className="absolute z-10 top-0 left-full ml-2 w-40 bg-gray-600 border border-gray-500 rounded-lg shadow-lg">
 //                               <div className="flex flex-col p-1">
-//                                 {/* 방장일 때만 강퇴 노출 */}
 //                                 {isHost && (
 //                                   <button
 //                                     onClick={() =>
 //                                       openEjectConfirm({
-//                                         id: msg.senderId,
+//                                         id: senderId,
 //                                         nickname: msg.senderNickName,
 //                                       })
 //                                     }
@@ -1253,11 +1354,10 @@
 //                                   </button>
 //                                 )}
 
-//                                 {/* 공통: 차단하기 */}
 //                                 <button
 //                                   onClick={() =>
 //                                     openBlockConfirm({
-//                                       id: msg.senderId,
+//                                       id: senderId,
 //                                       nickname: msg.senderNickName,
 //                                     })
 //                                   }
@@ -1280,7 +1380,7 @@
 //                         isMyMessage ? "bg-purple-600" : "bg-gray-700"
 //                       } break-all`}
 //                     >
-//                       <span className={!isMyMessage ? "pr-5" : ""}>
+//                       <span className={!isMyMessage ? "pr-1" : ""}>
 //                         {msg.content}
 //                       </span>
 
@@ -1299,12 +1399,11 @@
 //                           >
 //                             <Popover.Panel className="absolute z-10 top-0 left-full ml-2 w-40 bg-gray-600 border border-gray-500 rounded-lg shadow-lg">
 //                               <div className="flex flex-col p-1">
-//                                 {/* 방장일 때만 강퇴 노출 */}
 //                                 {isHost && (
 //                                   <button
 //                                     onClick={() =>
 //                                       openEjectConfirm({
-//                                         id: msg.senderId,
+//                                         id: senderId,
 //                                         nickname: msg.senderNickName,
 //                                       })
 //                                     }
@@ -1317,11 +1416,10 @@
 //                                   </button>
 //                                 )}
 
-//                                 {/* 공통: 차단하기 */}
 //                                 <button
 //                                   onClick={() =>
 //                                     openBlockConfirm({
-//                                       id: msg.senderId,
+//                                       id: senderId,
 //                                       nickname: msg.senderNickName,
 //                                     })
 //                                   }
@@ -1433,7 +1531,7 @@
 //                 disabled={isRateLimitedNow}
 //               />
 
-//               {/* GIF 버튼 */}
+//               {/* GIF 버튼 (게스트도 모달은 열 수 있음) */}
 //               <button
 //                 type="button"
 //                 onClick={() => setIsGifModalOpen(!isGifModalOpen)}
@@ -1565,6 +1663,11 @@ function countGraphemes(s: string): number {
 const MAX_LEN = 500;
 const SCROLL_CLASS = "duckon-chat-scroll";
 
+// ★ 도배 기준 및 차단 시간 (백엔드 REST와 맞춰서 5초에 5번)
+const RATE_LIMIT_MS = 5000;     // 차단 유지 시간: 5초
+const SPAM_WINDOW_MS = 5000;    // 검사 구간: 최근 5초
+const SPAM_MAX_MSG = 5;         // 5초 안에 5개까지 허용 → 6번째부터 도배
+
 // --- 공통 ConfirmModal (차단/강퇴 둘 다 여기서) ---
 const ConfirmModal = ({
   isOpen,
@@ -1675,8 +1778,11 @@ const ChatPanel = ({
   // 게스트가 GIF 클릭 시 띄울 안내 말풍선
   const [showGifGuestModal, setShowGifGuestModal] = useState(false);
 
-  // 도배 감지용
+  // ★ 도배 감지/차단 상태
   const [rateLimitedUntil, setRateLimitedUntil] = useState<number | null>(null);
+  const recentSendTimesRef = useRef<number[]>([]); // 최근 전송 시각 목록
+  const rateLimitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // 5초 해제 타이머
+
   const pendingSendRef = useRef<{
     content: string;
     at: number;
@@ -1687,6 +1793,15 @@ const ChatPanel = ({
 
   const isLoggedIn = !!myUser?.userId;
   const isGuest = !myUser;
+
+  // 컴포넌트 unmount 시 타이머 정리
+  useEffect(() => {
+    return () => {
+      if (rateLimitTimerRef.current) {
+        clearTimeout(rateLimitTimerRef.current);
+      }
+    };
+  }, []);
 
   // footer 높이 추적
   useEffect(() => {
@@ -1719,6 +1834,20 @@ const ChatPanel = ({
       setLastUnread(null);
     }
   };
+
+  // DEBUG: 마지막 메시지 로그
+  useEffect(() => {
+    if (!messages.length) return;
+    const last = messages[messages.length - 1];
+    const rawSender = (last as any).senderId;
+    const rawUserId = (last as any).userId;
+
+    console.log("[CHAT DEBUG] last message", {
+      senderId: rawSender,
+      userId: rawUserId,
+      content: last.content,
+    });
+  }, [messages]);
 
   // 메시지 들어올 때 처리 (unread + guest id 학습)
   useEffect(() => {
@@ -1823,19 +1952,32 @@ const ChatPanel = ({
         ) === String(myUser.userId) &&
         last.content === pending.content
       ) {
+        // 내가 보낸 메시지가 서버에서 돌아온 걸 확인 → pending 해제
         pendingSendRef.current = null;
-      } else if (messages.length > pending.msgCount) {
+      } else if (pending.self && messages.length > pending.msgCount) {
+        // 로그인 유저일 때만 백업 제거
         pendingSendRef.current = null;
       }
+      // 게스트(pending.self === false)는 guestId 학습용으로 유지
     }
 
     lastMsgCountRef.current = messages.length;
   }, [messages, myUser?.userId]);
 
-  // 도배 배너용
-  const triggerRateLimited = (ms = 5000) => {
-    const now = Date.now();
-    setRateLimitedUntil(now + ms);
+  // ★ 도배 배너 + 상태 해제 타이머
+  const triggerRateLimited = (ms = RATE_LIMIT_MS) => {
+    if (rateLimitTimerRef.current) {
+      clearTimeout(rateLimitTimerRef.current);
+    }
+
+    const until = Date.now() + ms;
+    setRateLimitedUntil(until);
+    recentSendTimesRef.current = []; // 차단 동안 카운트 초기화
+
+    rateLimitTimerRef.current = setTimeout(() => {
+      setRateLimitedUntil((prev) => (prev === until ? null : prev));
+      rateLimitTimerRef.current = null;
+    }, ms);
   };
 
   const URL_REGEX = /^https?:\/\//i;
@@ -1851,16 +1993,26 @@ const ChatPanel = ({
       return;
     }
 
-    const now = Date.now();
-    const isRateLimitedNow =
-      rateLimitedUntil !== null && now < rateLimitedUntil;
+    // ★ 이미 도배 차단 중이면 그냥 무시 (추가 연장 X)
+    if (rateLimitedUntil !== null) {
+      return;
+    }
 
-    if (isRateLimitedNow) {
+    // ★ 스팸 감지: 최근 SPAM_WINDOW_MS 안에 SPAM_MAX_MSG개 이상이면 도배로 간주
+    const now = Date.now();
+    const recent = recentSendTimesRef.current.filter(
+      (t) => now - t <= SPAM_WINDOW_MS
+    );
+    recent.push(now);
+    recentSendTimesRef.current = recent;
+
+    if (recent.length > SPAM_MAX_MSG) {
+      // 6번째부터 차단
       triggerRateLimited();
       return;
     }
 
-    const sentAt = Date.now();
+    const sentAt = now;
 
     pendingSendRef.current = {
       content: v,
@@ -1884,26 +2036,20 @@ const ChatPanel = ({
       }
     });
 
+    // WebSocket publish는 보통 에러가 없지만, 혹시 REST 등으로 바뀌었을 때 대비
     Promise.resolve(maybePromise).catch((err) => {
       const type =
         (err as any)?.response?.data?.type || (err as any)?.type || "";
-      if (type === "CHAT_RATE_LIMITED" || (err as any)?.status === 429) {
+      const status =
+        (err as any)?.response?.status ?? (err as any)?.status ?? null;
+
+      if (type === "CHAT_RATE_LIMITED" || status === 429) {
         triggerRateLimited();
         pendingSendRef.current = null;
       }
     });
 
-    setTimeout(() => {
-      const pendingNow = pendingSendRef.current;
-      if (!pendingNow) return;
-      if (
-        pendingNow.at === sentAt &&
-        lastMsgCountRef.current === pendingNow.msgCount
-      ) {
-        triggerRateLimited();
-        pendingSendRef.current = null;
-      }
-    }, 200);
+    // 🔥 예전 200ms 백업 타이머 완전 삭제 (랜덤 도배 모달 원인)
   };
 
   // ---- 차단 필터 ----
@@ -1990,8 +2136,8 @@ const ChatPanel = ({
     return previewGraphemes(m.content ?? "", 10);
   };
 
-  const isRateLimitedNow =
-    rateLimitedUntil !== null && Date.now() < rateLimitedUntil;
+  // ★ 단순히 “차단 중인지 여부”
+  const isRateLimitedNow = rateLimitedUntil !== null;
 
   const myId = String(myUser?.userId ?? guestId ?? "");
 
@@ -2041,14 +2187,25 @@ const ChatPanel = ({
         {/* 게스트 GIF 사용 제한 안내 말풍선 */}
         {showGifGuestModal && (
           <div
-            className="absolute left-1/2 -translate-x-1/2 z-[320] transition-opacity"
+            className="absolute left-1/2 -translate-x-1/2 z-[300] transition-opacity"
             style={{
               bottom: (footerH || 88) + 12,
               maxWidth: "92%",
             }}
           >
-            <div className="bg-gray-800 text-white text-sm md:text-base px-5 py-2 rounded-2xl shadow-lg border border-gray-600 flex items-center gap-2 whitespace-nowrap justify-center">
-              로그인한 유저만 밈을 사용할 수 있습니다.
+            <div
+              className=" 
+              flex items-center gap-2 justify-center
+              px-5 py-2
+              rounded-2xl
+              bg-gradient-to-r from-purple-600 via-purple-500 to-fuchsia-500
+              text-white text-sm md:text-base font-semibold tracking-tight
+              shadow-lg
+              border border-purple-300/40
+              whitespace-nowrap
+            "
+            >
+              로그인한 유저만 밈을 사용할 수 있습니다!
             </div>
           </div>
         )}
@@ -2108,7 +2265,7 @@ const ChatPanel = ({
                 </span>
 
                 <div
-                  className={`group relative flex items-end gap-2 max-w-[85%] ${
+                  className={`group relative flex items-end gap-1 max-w-[90%] ${
                     isMyMessage ? "flex-row-reverse" : "flex-row"
                   }`}
                 >
@@ -2189,7 +2346,7 @@ const ChatPanel = ({
                         isMyMessage ? "bg-purple-600" : "bg-gray-700"
                       } break-all`}
                     >
-                      <span className={!isMyMessage ? "pr-5" : ""}>
+                      <span className={!isMyMessage ? "pr-1" : ""}>
                         {msg.content}
                       </span>
 
@@ -2427,4 +2584,3 @@ const ChatPanel = ({
 };
 
 export default ChatPanel;
-
