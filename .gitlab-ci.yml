@@ -21,6 +21,17 @@ variables:
   FE_APP: "duckon-front-prod"
   BE_APP_DEV: "duckon-app-dev"
   FE_APP_DEV: "duckon-front-dev"
+  GIT_DEPTH: "10"
+  GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
+
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .gradle/caches/
+    - .gradle/wrapper/
+    - frontend/node_modules/
+    - md_frontend/node_modules/
+  policy: pull-push
 
 # 러너 태그
 .default_tags: &default_tags
@@ -33,17 +44,25 @@ build_backend:
   stage: build
   <<: *default_tags
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"'
-    - if: '$CI_COMMIT_BRANCH == "master"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"'
-    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - changes:
+        - backend/**/*
+        - build.gradle*
+        - settings.gradle*
+        - gradle/**/*
+        - .gitlab-ci.yml
+    - when: never
   image: gradle:8.6-jdk21
   variables:
     GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
   script:
     - cd backend
     - chmod +x ./gradlew || true
-    - ./gradlew --no-daemon clean build
+    - |
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ]; then
+        ./gradlew --build-cache --configuration-cache assemble -x test
+      else
+        ./gradlew --build-cache --configuration-cache clean build
+      fi
 
 # ───────────────────────────────────────────────────────────
 # FE 빌드
@@ -52,20 +71,25 @@ build_frontend:
   stage: build
   tags: ["duckon","dind"]
   image: node:20-alpine
+  rules:
+    # FE 관련 변경 있을 때만 실행
+    - changes:
+        - frontend/**/*
+        - frontend/package.json
+        - frontend/package-lock.json
+        - frontend/vite.config.* 
+        - .gitlab-ci.yml
+    - when: never
   script:
     - cd frontend
-    - npm ci
+    - npm ci --prefer-offline --no-audit --progress=false
     - |
-      # 브랜치에 따라 API Base 선택
       if [ "$CI_COMMIT_BRANCH" = "master" ] || [ "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" = "master" ]; then
         API_BASE="${VITE_API_BASE_URL_PROD:-/api}"
       else
         API_BASE="${VITE_API_BASE_URL_DEV:-/api}"
       fi
-      echo "VITE_API_BASE_URL=$API_BASE"
-      echo "VITE_YOUTUBE_API_KEY=$VITE_YOUTUBE_API_KEY"
-      # 👉 Vite 빌드에 둘 다 넘겨줌
-      VITE_API_BASE_URL="$API_BASE" VITE_YOUTUBE_API_KEY="$VITE_YOUTUBE_API_KEY" npm run build
+      VITE_API_BASE_URL="$API_BASE" VITE_YOUTUBE_API_KEY="$VITE_YOUTUBE_API_KEY" npm run build --silent
   artifacts:
     paths:
       - frontend/dist
@@ -82,6 +106,12 @@ deploy_frontend_prod:
     entrypoint: ["/bin/bash","-lc"]
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"'
+      changes:
+        - frontend/**/*
+        - frontend/package.json
+        - frontend/package-lock.json
+        - frontend/vite.config.*
+        - .gitlab-ci.yml
     - when: never
   needs:
     - job: build_frontend
@@ -239,7 +269,7 @@ deploy_dev:
     # develop 브랜치에 push/merge 되었을 때만 배포
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "develop"'
     - when: never
-  needs: [build_backend, build_frontend]
+  needs: [build_backend]
   before_script:
     - set -euxo pipefail
     - apk add --no-cache openssh-client bash git jq curl
@@ -370,22 +400,21 @@ deploy_dev:
 .variables_memeduck: &vars_memeduck
   MD_FE_DIR: "md_frontend"
 
-# 공통 러너 태그
-.default_tags: &duckon_tags
-  tags: ["duckon","dind"]
-
 # 1) Build (MR/Push 모두)
 build_memeduck_front:
   stage: build
-  <<: *duckon_tags
+  <<: *default_tags
   image: node:20-alpine
   variables:
     <<: *vars_memeduck
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master"'
-    - if: '$CI_COMMIT_BRANCH == "master"'
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"'
-    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - changes:
+        - md_frontend/**/*
+        - md_frontend/package.json
+        - md_frontend/package-lock.json
+        - md_frontend/vite.config.*
+        - .gitlab-ci.yml
+    - when: never
   script:
     - cd "$MD_FE_DIR"
     - npm ci
@@ -406,7 +435,7 @@ build_memeduck_front:
 # 2) Deploy to DEV (develop push/merge)
 deploy_memeduck_front_dev:
   stage: deploy
-  <<: *duckon_tags
+  <<: *default_tags
   image:
     name: amazon/aws-cli:2.17.60
     entrypoint: ["/bin/bash","-lc"]
@@ -449,7 +478,7 @@ deploy_memeduck_front_dev:
 # 3) Deploy to PROD (master push/merge)
 deploy_memeduck_front_prod:
   stage: deploy
-  <<: *duckon_tags
+  <<: *default_tags
   image:
     name: amazon/aws-cli:2.17.60
     entrypoint: ["/bin/bash","-lc"]
