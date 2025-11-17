@@ -656,9 +656,11 @@
 
 import { useEffect, useState } from "react";
 import { type MyUser } from "../types/mypage";
+import type { RoomHistory } from "../types/room";
 import {
   deleteMyAccount,
   fetchMyProfile,
+  fetchUserRooms,
   verifyPassword,
 } from "../api/userService";
 import PasswordConfirm from "../components/common/PasswordConfirm";
@@ -693,6 +695,10 @@ const loadLastImg = (userId?: string): string | undefined => {
 const MyPage = () => {
   const navigate = useNavigate();
   const [myUser, setMyUser] = useState<MyUser | null>(null);
+  const [rooms, setRooms] = useState<RoomHistory[]>([]);
+  const [roomsPage, setRoomsPage] = useState(1);
+  const [roomsTotal, setRoomsTotal] = useState(0);
+  const [roomsLoading, setRoomsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -767,6 +773,14 @@ const MyPage = () => {
           saveLastImg(uid, next.imgUrl as any);
           return next;
         });
+        
+        // 방 목록 로드
+        if (data?.userId) {
+          const roomsData = await fetchUserRooms(data.userId, 1, 12);
+          setRooms(roomsData.roomList);
+          setRoomsPage(1);
+          setRoomsTotal(roomsData.total);
+        }
       } finally {
         setLoading(false);
       }
@@ -776,7 +790,7 @@ const MyPage = () => {
 
   // ✅ 이후 재조회도 동일한 병합 + 보관
   useEffect(() => {
-    if (openList === null) {
+    if (openList === null && myUser) {
       const reloadProfile = async () => {
         try {
           const updated = await fetchMyProfile();
@@ -874,8 +888,29 @@ const MyPage = () => {
           />
         )}
 
-        {/* 내가 만든 방 패널 */}
-        <MyCreatedRoomsPanel rooms={myUser.roomList ?? []} pageSize={12} />
+      <div className="mt-8">
+        <MyCreatedRoomsPanel 
+          rooms={rooms} 
+          pageSize={12}
+          total={roomsTotal}
+          loading={roomsLoading}
+          onLoadMore={async () => {
+            if (roomsLoading || !myUser?.userId) return;
+            if (rooms.length >= roomsTotal) return;
+            
+            setRoomsLoading(true);
+            try {
+              const nextPage = roomsPage + 1;
+              const roomsData = await fetchUserRooms(myUser.userId, nextPage, 12);
+              setRooms(prev => [...prev, ...roomsData.roomList]);
+              setRoomsPage(nextPage);
+            } catch (error) {
+              console.error('방 목록 로드 실패:', error);
+            } finally {
+              setRoomsLoading(false);
+            }
+          }}
+        />
       </div>
 
       {/* 모달들 – 전체 화면 기준이라 바깥에 그대로 둠 */}
@@ -908,6 +943,7 @@ const MyPage = () => {
         isOpen={isChangePasswordModalOpen}
         onClose={() => setIsChangePasswordModalOpen(false)}
       />
+      </div>
     </div>
   );
 };
