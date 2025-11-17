@@ -1,7 +1,6 @@
 package com.a404.duckonback.controller;
 
 import com.a404.duckonback.dto.*;
-import com.a404.duckonback.entity.Meme;
 import com.a404.duckonback.exception.CustomException;
 import com.a404.duckonback.filter.CustomUserPrincipal;
 import com.a404.duckonback.response.ApiResponseDTO;
@@ -12,8 +11,8 @@ import com.a404.duckonback.service.MemeService;
 import com.a404.duckonback.service.MemeUsageLogService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -64,7 +63,6 @@ public class MemeController {
 
         return ResponseEntity.ok(ApiResponseDTO.success(SuccessCode.MEME_UPLOAD_SUCCESS, res));
     }
-
 
     @Operation(
             summary = "밈 S3에 업로드(테스트용) (JWT 필요O)",
@@ -184,21 +182,6 @@ public class MemeController {
     }
 
     @Operation(
-            summary = "내가 만든 밈 목록 조회 (JWT 필요O)",
-            description = "내가 생성한 밈을 최신순으로 조회합니다. 페이지네이션을 지원합니다."
-    )
-    @GetMapping("/mine")
-    public ResponseEntity<ApiResponseDTO<List<MyMemeDTO>>> getMyMemes(
-            @AuthenticationPrincipal CustomUserPrincipal principal,
-            @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "10") int size
-    ) {
-        if (principal == null) throw new CustomException("로그인이 필요합니다.", ErrorCode.USER_NOT_AUTHENTICATED);
-        List<MyMemeDTO> myMemes = memeService.getMyMemes(principal.getId(), page, size);
-        return ResponseEntity.ok(ApiResponseDTO.success(SuccessCode.MEME_RETRIEVE_SUCCESS, myMemes));
-    }
-
-    @Operation(
             summary = "태그 기반 밈 검색 (JWT 필요X)",
             description = "입력한 키워드를 포함(부분 일치)하는 태그명을 가진 밈들을 조회합니다. 결과는 usageCnt 내림차순으로 정렬됩니다."
     )
@@ -211,6 +194,5 @@ public class MemeController {
         MemeResponseDTO searchedMemes = memeService.searchByTagBasic(tag, page, size);
         return ResponseEntity.ok(ApiResponseDTO.success(SuccessCode.MEME_RETRIEVE_SUCCESS, searchedMemes));
     }
-
 
 }
