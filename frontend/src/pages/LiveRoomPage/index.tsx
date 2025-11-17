@@ -33,9 +33,9 @@ import { sendGifMessage } from "../../socket";
 import EjectAlarmModal from "../../components/common/modal/EjectAlarmModal";
 /** 추가: 재입장 시 400 에러용 킥 안내 모달 */
 import KickedInfoModal from "../../components/common/modal/KickedInfoModal";
+import { Capacitor } from "@capacitor/core";
 
 const DEFAULT_QUIZ_PROMPT = "비밀번호(정답)를 입력하세요.";
-
 
 // 백엔드가 이제 playlist에 전체 URL도 보낼 수 있으니까 여기서 전부 videoId로 바꿔버린다.
 const extractVideoId = (value: string): string => {
@@ -44,7 +44,7 @@ const extractVideoId = (value: string): string => {
 
   // https://youtube.com/watch?v=AbCdEf12345
   const fullMatch = trimmed.match(
-    /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([\\w-]{11})/
+    /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/|shorts\/))([\w-]{11})/
   );
   if (fullMatch?.[1]) return fullMatch[1];
 
@@ -133,6 +133,27 @@ const LiveRoomPage = () => {
 
   const isHostView = !!(room && myUser && room.hostId === myUser.userId);
 
+  // 앱 여부 / 가로 모드 여부
+  const isNativeApp = Capacitor.isNativePlatform();
+  const [isLandscape, setIsLandscape] = useState(false);
+
+  useEffect(() => {
+    const updateOrientation = () => {
+      try {
+        setIsLandscape(window.innerWidth > window.innerHeight);
+      } catch {
+        setIsLandscape(false);
+      }
+    };
+    updateOrientation();
+    window.addEventListener("resize", updateOrientation);
+    window.addEventListener("orientationchange", updateOrientation as any);
+    return () => {
+      window.removeEventListener("resize", updateOrientation);
+      window.removeEventListener("orientationchange", updateOrientation as any);
+    };
+  }, []);
+
   // 1) 차단 목록 state
   const blockedSet = useUserStore((s) => s.blockedSet);
   const setBlockedList = useUserStore((s) => s.setBlockedList);
@@ -161,7 +182,7 @@ const LiveRoomPage = () => {
   //   blockLocal(userId);
   // };
 
-  const handleBlockUser = async (userId:string) => {
+  const handleBlockUser = async (userId: string) => {
     try {
       await blockUser(userId);
       blockLocal(userId);
@@ -173,7 +194,10 @@ const LiveRoomPage = () => {
   };
 
   const visibleMessages = messages.filter(
-    (m) => !blockedSet.has(String((m as any).senderId ?? (m as any).userId ?? ""))
+    (m) =>
+      !blockedSet.has(
+        String((m as any).senderId ?? (m as any).userId ?? "")
+      )
   );
 
   const parseId = (raw: string | null) => {
@@ -271,7 +295,7 @@ const LiveRoomPage = () => {
     } catch (error: any) {
       const status = error.response?.status;
 
-      /** ⬇️ 추가: 재입장 시 백엔드 400(KICKED) 응답 처리 */
+      /** 재입장 시 백엔드 400(KICKED) 응답 처리 */
       if (status === 400) {
         setKickedOpen(true);
         return;
@@ -791,7 +815,9 @@ const LiveRoomPage = () => {
                       ? evt.currentTime
                       : prev.currentTime,
                   playing:
-                    typeof evt.playing === "boolean" ? evt.playing : prev.playing,
+                    typeof evt.playing === "boolean"
+                      ? evt.playing
+                      : prev.playing,
                   lastUpdated: evt.lastUpdated ?? prev.lastUpdated,
                 };
               });
@@ -875,7 +901,7 @@ const LiveRoomPage = () => {
       } catch (err: any) {
         const status = err?.response?.status;
 
-        /** ⬇️ 추가: 재입장 시 백엔드 400(KICKED) 응답 처리 */
+        /** 재입장 시 백엔드 400(KICKED) 응답 처리 */
         if (status === 400) {
           setKickedOpen(true);
           return;
@@ -1086,7 +1112,8 @@ const LiveRoomPage = () => {
   }, [roomId, resolvedArtistId]);
 
   // 이미지 URL 감지 → GIF 전송 래퍼
-  const IMAGE_URL = /^(https?:\/\/[^\s]+)\.(gif|webp|png|jpe?g|bmp)(\?.*)?$/i;
+  const IMAGE_URL =
+    /^(https?:\/\/[^\s]+)\.(gif|webp|png|jpe?g|bmp)(\?.*)?$/i;
   const sendMessageSmart = (content: string) => {
     const v = (content ?? "").trim();
     if (!v) return Promise.resolve();
@@ -1116,7 +1143,7 @@ const LiveRoomPage = () => {
             onExit={() => navigate("/")}
           />
         )}
-        {/* 재입장 금지(400) 모달 */}
+
         <KickedInfoModal
           isOpen={kickedOpen}
           title="입장 불가"
@@ -1131,9 +1158,15 @@ const LiveRoomPage = () => {
             navigate("/");
           }}
           onClose={() => setKickedOpen(false)}
-          // force // 필요시 확인 버튼으로만 닫게 하려면 활성화
         />
-        <div className="flex justify-center items-center h-screen bg-gray-900">
+        <div
+          className="flex justify-center items-center h-screen bg-gray-900"
+          style={
+            isNativeApp
+              ? { paddingTop: "env(safe-area-inset-top)" }
+              : undefined
+          }
+        >
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
         </div>
       </>
@@ -1148,8 +1181,193 @@ const LiveRoomPage = () => {
   const currentVideoId =
     safePlaylist?.[room.currentVideoIndex ?? 0] ?? safePlaylist?.[0] ?? "";
 
+  // 공통: 비디오 블록 렌더러
+  const renderVideoForWeb = () => (
+    <div className="w-full max-w-full max-h-full aspect-video rounded-lg border border-gray-800 overflow-hidden">
+      {stompClient ? (
+        <VideoPlayer
+          videoId={currentVideoId}
+          isHost={room.hostId === myUserId}
+          stompClient={stompClient}
+          user={myUser!}
+          roomId={room.roomId}
+          playlist={safePlaylist}
+          currentVideoIndex={room.currentVideoIndex ?? 0}
+          isPlaylistUpdating={isPlaylistUpdating}
+          onVideoEnd={handleVideoEnd}
+          roomTitle={room.title ?? ""}
+          hostNickname={room.hostNickname ?? myUser?.nickname}
+        />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center text-gray-400">
+          플레이어 연결 중...
+        </div>
+      )}
+    </div>
+  );
+
+  // 앱 세로 모드에서의 비디오 렌더
+  const renderVideoForAppPortrait = () => (
+    <div className="relative w-full h-full bg-black">
+      {stompClient ? (
+        <VideoPlayer
+          videoId={currentVideoId}
+          isHost={room.hostId === myUserId}
+          stompClient={stompClient}
+          user={myUser!}
+          roomId={room.roomId}
+          playlist={safePlaylist}
+          currentVideoIndex={room.currentVideoIndex ?? 0}
+          isPlaylistUpdating={isPlaylistUpdating}
+          onVideoEnd={handleVideoEnd}
+          roomTitle={room.title ?? ""}
+          hostNickname={room.hostNickname ?? myUser?.nickname}
+        />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center text-gray-400">
+          플레이어 연결 중...
+        </div>
+      )}
+      <div className="pointer-events-none absolute inset-0 flex items-end justify-end pr-3 pb-3">
+        <button
+          type="button"
+          className="pointer-events-auto w-7 h-7 rounded-full
+                    bg-black/60 border border-white/40
+                    flex items-center justify-center
+                    text-white text-[15px]"
+        >
+          ↻
+        </button>
+      </div>
+    </div>
+  );
+
+
+  // 웹 + (앱 가로) 레이아웃: 기존 구조 유지
+  const webLikeBody = (
+    <div className="flex flex-col md:flex-row flex-1 min-h-0">
+
+      <main className="flex-1 min-h-0 bg-black px-3 pt-3 pb-2 md:p-4 flex justify-center items-start md:items-center overflow-hidden">
+        {renderVideoForWeb()}
+      </main>
+
+      <aside
+        className="w-full md:w-80 bg-gray-800 flex flex-col
+                    border-t md:border-t-0 md:border-l border-gray-700
+                    h-[42svh] md:h-auto
+                    overflow-hidden flex-shrink-0
+                    rounded-t-2xl md:rounded-none
+                    shadow-[0_-8px_24px_rgba(0,0,0,0.85)] md:shadow-none"
+      >
+
+        <div className="flex flex-shrink-0 border-b border-t md:border-t-0 border-gray-700">
+          <button
+            onClick={() => setActiveTab("chat")}
+            className={`flex-1 py-2 text-sm font-semibold text-center transition-colors ${
+              activeTab === "chat"
+                ? "text-white border-b-2 border-fuchsia-500"
+                : "text-gray-400 hover:text-white"
+            }`}
+          >
+            실시간 채팅
+          </button>
+          <button
+            onClick={() => setActiveTab("playlist")}
+            className={`flex-1 py-2 text-sm font-semibold text-center transition-colors ${
+              activeTab === "playlist"
+                ? "text-white border-b-2 border-fuchsia-500"
+                : "text-gray-400 hover:text-white"
+            }`}
+          >
+            플레이리스트
+          </button>
+        </div>
+
+        <RightSidebar
+          selectedTab={activeTab}
+          isHost={room.hostId === myUserId}
+          roomId={roomId}
+          messages={visibleMessages}
+          sendMessage={sendMessageSmart}
+          playlist={safePlaylist}
+          currentVideoIndex={room.currentVideoIndex ?? 0}
+          onAddToPlaylist={handleAddToPlaylist}
+          onSelectPlaylistIndex={handleJumpToIndex}
+          onReorderPlaylist={handleReorderPlaylist}
+          onDeletePlaylistItem={handleDeletePlaylistItem}
+          onBlockUser={handleBlockUser}
+          onEjectUser={handleEjectUser}
+        />
+      </aside>
+    </div>
+  );
+
+  // 앱 세로 레이아웃: 영상 위 / 채팅 아래 (겹치지 않게)
+  const appPortraitBody = (
+    <div className="flex flex-col flex-1 min-h-0 bg-black">
+      <main className="flex-1 flex justify-center items-center overflow-hidden">
+        {renderVideoForAppPortrait()}
+      </main>
+      <aside
+        className="w-full bg-gray-800 flex flex-col
+                    border-t border-gray-700
+                    h-[42svh]
+                    overflow-hidden flex-shrink-0
+                    rounded-t-2xl
+                    shadow-[0_-8px_24px_rgba(0,0,0,0.85)]"
+      >
+        <div className="flex flex-shrink-0 border-b border-gray-700">
+          <button
+            onClick={() => setActiveTab("chat")}
+            className={`flex-1 py-2 text-sm font-semibold text-center transition-colors ${
+              activeTab === "chat"
+                ? "text-white border-b-2 border-fuchsia-500"
+                : "text-gray-400 hover:text-white"
+            }`}
+          >
+            실시간 채팅
+          </button>
+          <button
+            onClick={() => setActiveTab("playlist")}
+            className={`flex-1 py-2 text-sm font-semibold text-center transition-colors ${
+              activeTab === "playlist"
+                ? "text-white border-b-2 border-fuchsia-500"
+                : "text-gray-400 hover:text-white"
+            }`}
+          >
+            플레이리스트
+          </button>
+        </div>
+
+        <RightSidebar
+          selectedTab={activeTab}
+          isHost={room.hostId === myUserId}
+          roomId={roomId}
+          messages={visibleMessages}
+          sendMessage={sendMessageSmart}
+          playlist={safePlaylist}
+          currentVideoIndex={room.currentVideoIndex ?? 0}
+          onAddToPlaylist={handleAddToPlaylist}
+          onSelectPlaylistIndex={handleJumpToIndex}
+          onReorderPlaylist={handleReorderPlaylist}
+          onDeletePlaylistItem={handleDeletePlaylistItem}
+          onBlockUser={handleBlockUser}
+          onEjectUser={handleEjectUser}
+        />
+      </aside>
+    </div>
+  );
+
+  const mainBody =
+    !isNativeApp || isLandscape ? webLikeBody : appPortraitBody;
+
   return (
-    <div className="flex flex-col h-[100svh] bg-gray-900 text-white">
+    <div
+      className="flex flex-col h-[100svh] bg-gray-900 text-white"
+      style={
+        isNativeApp ? { paddingTop: "env(safe-area-inset-top)" } : undefined
+      }
+    >
       <RoomDeletedModal
         isOpen={roomDeletedOpen}
         onConfirm={async () => {
@@ -1167,7 +1385,6 @@ const LiveRoomPage = () => {
         />
       )}
 
-      {/* 기존: 실시간 강퇴 알림 모달 */}
       {isKicked && (
         <EjectAlarmModal
           onClose={() => {
@@ -1200,7 +1417,6 @@ const LiveRoomPage = () => {
           navigate("/");
         }}
         onClose={() => setKickedOpen(false)}
-        // force
       />
 
       {room && (
@@ -1219,81 +1435,7 @@ const LiveRoomPage = () => {
         />
       )}
 
-      {/* 본문 */}
-      <div className="flex flex-col md:flex-row flex-1 min-h-0">
-        {/* 왼쪽: 영상 */}
-        <main className="flex-1 min-h-0 bg-black p-4 flex justify-center items-center overflow-hidden">
-          <div className="w-full max-w-full max-h-full aspect-video rounded-lg border border-gray-800 overflow-hidden">
-            {stompClient ? (
-              <VideoPlayer
-                videoId={currentVideoId}
-                isHost={room.hostId === myUserId}
-                stompClient={stompClient}
-                user={myUser!}
-                roomId={room.roomId}
-                playlist={safePlaylist}
-                currentVideoIndex={room.currentVideoIndex ?? 0}
-                isPlaylistUpdating={isPlaylistUpdating}
-                onVideoEnd={handleVideoEnd}
-                roomTitle={room.title ?? ""}
-                hostNickname={room.hostNickname ?? myUser?.nickname}
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-gray-400">
-                플레이어 연결 중...
-              </div>
-            )}
-          </div>
-        </main>
-
-        {/* 오른쪽: 사이드바 */}
-        <aside
-          className="w-full md:w-80 bg-gray-800 flex flex-col
-                    border-t md:border-t-0 md:border-l border-gray-700
-                    max-h-[44svh] md:max-h-none
-                    overflow-hidden flex-shrink-0"
-        >
-          {/* 탭 */}
-          <div className="flex flex-shrink-0 border-b border-t md:border-t-0 border-gray-700">
-            <button
-              onClick={() => setActiveTab("chat")}
-              className={`flex-1 py-2 text-sm font-semibold text-center transition-colors ${
-                activeTab === "chat"
-                  ? "text-white border-b-2 border-fuchsia-500"
-                  : "text-gray-400 hover:text-white"
-              }`}
-            >
-              실시간 채팅
-            </button>
-            <button
-              onClick={() => setActiveTab("playlist")}
-              className={`flex-1 py-2 text-sm font-semibold text-center transition-colors ${
-                activeTab === "playlist"
-                  ? "text-white border-b-2 border-fuchsia-500"
-                  : "text-gray-400 hover:text-white"
-              }`}
-            >
-              플레이리스트
-            </button>
-          </div>
-
-          <RightSidebar
-            selectedTab={activeTab}
-            isHost={room.hostId === myUserId}
-            roomId={roomId}
-            messages={visibleMessages}
-            sendMessage={sendMessageSmart}
-            playlist={safePlaylist}
-            currentVideoIndex={room.currentVideoIndex ?? 0}
-            onAddToPlaylist={handleAddToPlaylist}
-            onSelectPlaylistIndex={handleJumpToIndex}
-            onReorderPlaylist={handleReorderPlaylist}
-            onDeletePlaylistItem={handleDeletePlaylistItem}
-            onBlockUser={handleBlockUser}
-            onEjectUser={handleEjectUser}
-          />
-        </aside>
-      </div>
+      {mainBody}
 
       <ConfirmModal
         isOpen={isDeleteOpen}

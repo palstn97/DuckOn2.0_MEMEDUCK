@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import YouTube from "react-youtube";
 import { Client } from "@stomp/stompjs";
 import { Capacitor } from "@capacitor/core";
+import { ScreenOrientation } from "@capacitor/screen-orientation"; // 앱 회전 제어
+import { RotateCw } from "lucide-react";
 import type { User } from "../../types";
 import type { LiveRoomSyncDTO } from "../../types/room";
 
@@ -42,7 +44,57 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 }) => {
   const playerRef = useRef<YT.Player | null>(null);
 
-  // 이 탭(session)에서 이미 '사운드 켜기'를 눌렀는지 여부 (탭 닫힐 때까지 유지)
+  // 앱 회전 상태 (세로 / 가로)
+  const [orientation, setOrientation] = useState<"portrait" | "landscape">(
+    "portrait"
+  );
+
+  // 앱에서만 현재 orientation 동기화
+  useEffect(() => {
+    if (!isNativeApp) return;
+
+    const init = async () => {
+      try {
+        const info = await ScreenOrientation.orientation();
+        const isLand = info.type.startsWith("landscape");
+        setOrientation(isLand ? "landscape" : "portrait");
+      } catch {
+        // 무시
+      }
+    };
+
+    init();
+
+    const sub = ScreenOrientation.addListener(
+      "screenOrientationChange",
+      (ev) => {
+        const isLand = ev.type.startsWith("landscape");
+        setOrientation(isLand ? "landscape" : "portrait");
+      }
+    );
+
+    return () => {
+      sub.then((s) => s.remove()).catch(() => {});
+    };
+  }, []);
+
+  // 회전 토글 버튼 핸들러 (세로 <-> 가로)
+  const handleOrientationToggle = async () => {
+    if (!isNativeApp) return;
+
+    try {
+      if (orientation === "portrait") {
+        await ScreenOrientation.lock({ orientation: "landscape" });
+        setOrientation("landscape");
+      } else {
+        await ScreenOrientation.lock({ orientation: "portrait" });
+        setOrientation("portrait");
+      }
+    } catch (e) {
+      console.warn("회전 잠금 실패", e);
+    }
+  };
+
   const initialUnlocked = (() => {
     try {
       return sessionStorage.getItem("audioUnlocked") === "1";
@@ -52,15 +104,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   })();
   const audioUnlockedRef = useRef<boolean>(initialUnlocked);
 
-  // 시청 관련 상태
-  const [canWatch, setCanWatch] = useState(false); // 참가자 재생 허용(재생 중) 여부
-  const justSynced = useRef(false); // sync 직후 onStateChange 가드
+  const [canWatch, setCanWatch] = useState(false);
+  const justSynced = useRef(false);
 
-  // 언락되어 있으면 시작부터 비뮤트
   const [muted, setMuted] = useState<boolean>(!audioUnlockedRef.current);
-  const [showUnmuteHint, setShowUnmuteHint] = useState(false); // "사운드 켜기" 안내 버튼
+  const [showUnmuteHint, setShowUnmuteHint] = useState(false);
 
-  // 소프트 보정 타이머
   const rateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearRateTimer = () => {
     if (rateTimerRef.current) {
@@ -72,13 +121,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const p = playerRef.current;
     if (!p) return;
     try {
-      if (typeof p.getPlaybackRate === "function" && p.getPlaybackRate() !== 1) {
+      if (p.getPlaybackRate() !== 1) {
         p.setPlaybackRate(1);
       }
     } catch {}
   };
 
-  // ENDED 중복 호출 방지
   const endFiredRef = useRef(false);
 
   const onPlayerReady = async (event: YT.PlayerEvent) => {
@@ -87,23 +135,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     try {
       if (isHost) {
-        // 방장: 소리 ON 자동재생 시도, 거부 시 아래 catch로 폴백
         p.unMute?.();
         p.setVolume?.(100);
         setMuted(false);
         await p.playVideo();
         setCanWatch(true);
       } else {
-        // 참가자
         if (audioUnlockedRef.current) {
-          // 이미 언락된 참가자는 다시는 mute로 돌리지 않음
           p.unMute?.();
           p.setVolume?.(100);
           setMuted(false);
           await p.playVideo();
           setCanWatch(true);
         } else {
-          // 아직 언락 전이면 정책상 mute 시작
           p.mute?.();
           p.setVolume?.(100);
           setMuted(true);
@@ -111,7 +155,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         }
       }
     } catch {
-      // 자동재생 거부 → mute 재생으로 폴백
       try {
         p.mute?.();
         setMuted(!audioUnlockedRef.current);
@@ -134,13 +177,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
 
     if (event.data === YT.PlayerState.PLAYING) {
-      endFiredRef.current = false; // 다음 종료 감지 준비
+      endFiredRef.current = false;
     }
 
     const player = playerRef.current;
     if (!stompClient.connected || !player) return;
 
-    // 참가자: 임의 조작 차단(호스트만 컨트롤)
     if (!isHost) {
       if (event.data === YT.PlayerState.PAUSED && canWatch) {
         try {
@@ -158,7 +200,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       return;
     }
 
-    // 방장: 상태 브로드캐스트
     const payload: LiveRoomSyncDTO = {
       eventType: "SYNC_STATE",
       roomId,
@@ -178,7 +219,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     });
   };
 
-  // 참가자: SYNC_STATE 구독 및 드리프트 보정
   useEffect(() => {
     if (!stompClient || !stompClient.connected || isHost) return;
 
@@ -188,7 +228,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         return;
       }
 
-      // requestAnimationFrame으로 부드러운 드리프트 체크 (앱 전용)
       let animationFrameId: number | null = null;
       let lastCheckTime = 0;
       const CHECK_INTERVAL = 300;
@@ -196,7 +235,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const continuousDriftCheck = (timestamp: number) => {
         if (timestamp - lastCheckTime > CHECK_INTERVAL) {
           lastCheckTime = timestamp;
-          
           const player = playerRef.current;
           if (player && canWatch) {
             try {
@@ -204,7 +242,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             } catch {}
           }
         }
-        
         animationFrameId = requestAnimationFrame(continuousDriftCheck);
       };
 
@@ -225,10 +262,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
             const now = Date.now();
             const expectedTime =
               typeof parsed.lastUpdated === "number"
-                ? (parsed.currentTime ?? 0) + (now - parsed.lastUpdated) / 1000
+                ? (parsed.currentTime ?? 0) +
+                  (now - parsed.lastUpdated) / 1000
                 : parsed.currentTime ?? 0;
 
-            // 재생 안내 버튼 (언락 전일 때만 노출)
             if (parsed.playing && muted) setShowUnmuteHint(true);
 
             const localTime = player.getCurrentTime();
@@ -241,7 +278,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 restoreNormalRate();
                 player.seekTo(expectedTime, true);
                 justSynced.current = true;
-                player.playVideo(); // mute 상태면 자동재생 허용
+                player.playVideo();
                 setCanWatch(true);
                 return;
               }
@@ -294,7 +331,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
   }, [stompClient, isHost, roomId, canWatch, muted]);
 
-  // 방장: 하트비트
   useEffect(() => {
     if (!isHost || !stompClient.connected || isPlaylistUpdating) return;
 
@@ -311,7 +347,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         playlist,
         currentVideoIndex,
         currentTime: player.getCurrentTime(),
-        playing: player.getPlayerState() === YT.PlayerState.PLAYING,
+        playing:
+          player.getPlayerState() === YT.PlayerState.PLAYING,
         lastUpdated: Date.now(),
       };
 
@@ -334,7 +371,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     hostNickname,
   ]);
 
-  // 같은 videoId가 연속으로 와도 강제 로드하여 자동 넘김 이슈 해결
   const prevIndexRef = useRef<number>(currentVideoIndex);
   const prevVideoIdRef = useRef<string>(videoId);
   useEffect(() => {
@@ -346,9 +382,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     if (videoChanged || indexChanged) {
       try {
-        // 항상 초기화 후 새로 로드
         p.stopVideo?.();
-        p.loadVideoById({ videoId, startSeconds: 0 });
+        p.loadVideoById({
+          videoId,
+          startSeconds: 0,
+        });
         if (isHost) {
           p.playVideo?.();
         }
@@ -361,7 +399,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [videoId, currentVideoIndex, isHost]);
 
-  // 참가자: "사운드 켜기"
   const handleUnmute = () => {
     const p = playerRef.current;
     if (!p) return;
@@ -370,7 +407,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       p.setVolume?.(100);
       setMuted(false);
       setShowUnmuteHint(false);
-      // 이 탭에서 이후로는 계속 소리 ON 유지
       audioUnlockedRef.current = true;
       sessionStorage.setItem("audioUnlocked", "1");
     } catch (e) {
@@ -378,7 +414,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   };
 
-  // 이미 언락된 참가자는 처음부터 비뮤트로 시작
   const initialMute = isHost ? 0 : (audioUnlockedRef.current ? 0 : 1);
 
   return (
@@ -428,6 +463,28 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 방장이 영상을 재생할 때까지 대기 중입니다...
               </div>
             </div>
+          )}
+
+          {isNativeApp && (
+            <button
+              type="button"
+              onClick={handleOrientationToggle}
+              className="
+                absolute bottom-4 right-4 z-30
+                active:scale-95 transition-transform
+              "
+            >
+              <div
+                className="
+                  w-10 h-10 rounded-full
+                  shadow-[0_4px_12px_rgba(0,0,0,0.35)]
+                  border border-black/5
+                  flex items-center justify-center
+                "
+              >
+                <RotateCw className="w-5 h-5 text-gray-900" strokeWidth={2} />
+              </div>
+            </button>
           )}
         </>
       ) : (
