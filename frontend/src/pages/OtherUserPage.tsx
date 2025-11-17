@@ -1,19 +1,28 @@
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import type { OtherUser } from "../types/otherUser";
-import { fetchOtherUserProfile } from "../api/userService";
+import type { RoomHistory } from "../types/room";
+import { fetchOtherUserProfile, fetchUserRooms } from "../api/userService";
 import { followUser, unfollowUser } from "../api/follow/followService";
 import OtherProfileCard from "../components/domain/user/OtherProfileCard";
-import OtherUserRoomsPanel from "../components/domain/room/OtherUserRoomsPanel";
+import MyCreatedRoomsPanel from "../components/domain/room/MyCreatedRoomsPanel";
 import { LoaderCircle, AlertTriangle } from "lucide-react";
+import { useUserStore } from "../store/useUserStore";
 
 const OtherUserPage = () => {
   const { userId } = useParams<{ userId: string }>();
+  const navigate = useNavigate();
+  const myUser = useUserStore((state) => state.myUser);
 
   const [otherUser, setOtherUser] = useState<OtherUser | null>(null);
+  const [rooms, setRooms] = useState<RoomHistory[]>([]);
+  const [roomsPage, setRoomsPage] = useState(1);
+  const [roomsTotal, setRoomsTotal] = useState(0);
+  const [roomsLoading, setRoomsLoading] = useState(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<Error | null>(null);
   const [isFollowLoading, setIsFollowLoading] = useState<boolean>(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
 
   useEffect(() => {
     if (!userId) {
@@ -25,8 +34,16 @@ const OtherUserPage = () => {
       setIsLoading(true);
       setError(null);
       try {
-        const data = await fetchOtherUserProfile(userId);
+        // 타 유저 정보 조회 (비로그인 사용자도 가능)
+        const myUserId = myUser?.userId || null;
+        const data = await fetchOtherUserProfile(userId, myUserId);
         setOtherUser(data);
+
+        // 방 목록 조회
+        const roomsData = await fetchUserRooms(userId, 1, 12);
+        setRooms(roomsData.roomList);
+        setRoomsPage(1);
+        setRoomsTotal(roomsData.total);
       } catch (err) {
         setError(err as Error);
       } finally {
@@ -34,7 +51,7 @@ const OtherUserPage = () => {
       }
     };
     getUserData();
-  }, [userId]);
+  }, [userId, myUser?.userId]);
 
   // // 팔로우만 가능하도록 처리
   // const handleFollow = async () => {
@@ -54,6 +71,12 @@ const OtherUserPage = () => {
   // };
 
   const handleToggleFollow = async () => {
+    // 비로그인 사용자면 로그인 모달 표시
+    if (!myUser) {
+      setShowLoginModal(true);
+      return;
+    }
+
     if (!otherUser || isFollowLoading) return;
 
     setIsFollowLoading(true);
@@ -88,6 +111,24 @@ const OtherUserPage = () => {
       console.error("Follow/Unfollow failed", err);
     } finally {
       setIsFollowLoading(false);
+    }
+  };
+
+  // 무한스크롤 - 방 목록 추가 로드
+  const handleLoadMoreRooms = async () => {
+    if (roomsLoading || !userId) return;
+    if (rooms.length >= roomsTotal) return;
+
+    setRoomsLoading(true);
+    try {
+      const nextPage = roomsPage + 1;
+      const roomsData = await fetchUserRooms(userId, nextPage, 12);
+      setRooms((prev) => [...prev, ...roomsData.roomList]);
+      setRoomsPage(nextPage);
+    } catch (error) {
+      console.error("방 목록 로드 실패:", error);
+    } finally {
+      setRoomsLoading(false);
     }
   };
 
@@ -126,14 +167,42 @@ const OtherUserPage = () => {
         isFollowLoading={isFollowLoading}
       />
 
-      {/* 타인 히스토리 + 현재 라이브(중복 제거, 라이브만 입장 가능) */}
+      {/* 방 생성 히스토리 */}
       <div className="mt-8">
-        <OtherUserRoomsPanel
-          rooms={otherUser.roomList ?? []}
-          activeRoom={otherUser.activeRoom ?? null}
-          title={`${otherUser.nickname}님이 만든 방`}
+        <MyCreatedRoomsPanel
+          rooms={rooms}
+          pageSize={12}
+          total={roomsTotal}
+          loading={roomsLoading}
+          onLoadMore={handleLoadMoreRooms}
         />
       </div>
+
+      {/* 로그인 모달 */}
+      {showLoginModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-sm w-full mx-4">
+            <h2 className="text-lg font-bold mb-4">로그인이 필요합니다</h2>
+            <p className="text-gray-600 mb-6">
+              팔로우 기능을 사용하려면 로그인이 필요합니다.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowLoginModal(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50"
+              >
+                취소
+              </button>
+              <button
+                onClick={() => navigate("/login")}
+                className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700"
+              >
+                로그인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -540,7 +540,7 @@
 // export default MyPage;
 
 // src/pages/MyPage.tsx
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Container,
@@ -574,7 +574,8 @@ import { fetchMyFavoriteMemes } from '../api/memeFavorite';
 import { useFavoriteMemes } from '../hooks/useFavoriteMemes';
 import NicknameWithRank from '../components/common/NicknameWithRank';
 import RankProgress from '../components/common/RankProgress';
-import { getMyMemes, type MyMemeItem } from '../api/memeService';
+import { fetchUserMemes, type UserMemeItem } from '../api/memeService';
+import ChangePasswordModal from '../components/common/ChangePasswordModal';
 
 // 마이페이지에서 카드에 넘길 형태
 type FavoriteMemeForPage = {
@@ -653,15 +654,16 @@ const MyPage = () => {
   const [uploadedMemes, setUploadedMemes] = useState<UploadedMeme[]>([]);
 
   // 마운트 때 한 번, 그리고 훅이 서버 목록을 다 읽어온(isLoaded) 뒤에 한 번 더 가져옴
+  // favoriteIds가 변경될 때마다 목록을 다시 불러옴 (즐겨찾기 추가/제거 시 즉시 반영)
   useEffect(() => {
     const loadFavorites = async () => {
       try {
-        const list = await fetchMyFavoriteMemes(); // [{memeId, memeUrl, tags, ...}]
-        const mapped: FavoriteMemeForPage[] = (list || []).map((item: any) => ({
+        const response = await fetchMyFavoriteMemes(1, 100); // 페이지네이션 지원
+        const mapped: FavoriteMemeForPage[] = (response.items || []).map((item) => ({
           id: String(item.memeId),
           gifUrl: item.memeUrl,
-          tags: item.tags || [],
-          favoritedAt: item.favoritedAt,
+          tags: [],
+          favoritedAt: undefined,
         }));
         setFavoriteMemes(mapped);
       } catch (e) {
@@ -673,24 +675,33 @@ const MyPage = () => {
     if (isLoaded) {
       loadFavorites();
     }
-  }, [isLoaded]);
+  }, [isLoaded, favoriteIds]);
 
-  // 내가 업로드한 밈 목록 불러오기
+  // 내가 업로드한 밈 목록 불러오기 (새로운 API)
+  const [memesPage, setMemesPage] = useState(1);
+  const [memesTotal, setMemesTotal] = useState(0);
+  const [memesLoading, setMemesLoading] = useState(false);
+  const memesObserverTarget = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     const loadMyMemes = async () => {
+      if (!myUser?.userId) return;
+      
       try {
-        const response = await getMyMemes(1, 100); // 페이지 1, 사이즈 100
-        const mapped: UploadedMeme[] = (response.data || []).map((item: MyMemeItem) => ({
+        const response = await fetchUserMemes(myUser.userId, 1, 20);
+        const mapped: UploadedMeme[] = (response.data.items || []).map((item: UserMemeItem) => ({
           id: String(item.memeId),
-          gifUrl: item.imageUrl,
-          tags: [], // API 응답에 tags가 없으므로 빈 배열
-          viewCount: item.usageCnt,
-          likeCount: 0, // API 응답에 없음
-          uploadedAt: item.createdAt,
-          usageCnt: item.usageCnt,
-          downloadCnt: item.downloadCnt,
+          gifUrl: item.memeUrl,
+          tags: [],
+          viewCount: 0,
+          likeCount: 0,
+          uploadedAt: '',
+          usageCnt: 0,
+          downloadCnt: 0,
         }));
         setUploadedMemes(mapped);
+        setMemesPage(1);
+        setMemesTotal(response.data.total);
       } catch (e) {
         console.error('내가 업로드한 밈 로드 실패:', e);
       }
@@ -701,12 +712,67 @@ const MyPage = () => {
     }
   }, [myUser]);
 
+  // 무한스크롤 - 업로드한 밈 추가 로드
+  const loadMoreMemes = async () => {
+    if (memesLoading || !myUser?.userId) return;
+    if (uploadedMemes.length >= memesTotal) return;
+
+    setMemesLoading(true);
+    try {
+      const nextPage = memesPage + 1;
+      const response = await fetchUserMemes(myUser.userId, nextPage, 20);
+      const mapped: UploadedMeme[] = (response.data.items || []).map((item: UserMemeItem) => ({
+        id: String(item.memeId),
+        gifUrl: item.memeUrl,
+        tags: [],
+        viewCount: 0,
+        likeCount: 0,
+        uploadedAt: '',
+        usageCnt: 0,
+        downloadCnt: 0,
+      }));
+      setUploadedMemes(prev => [...prev, ...mapped]);
+      setMemesPage(nextPage);
+    } catch (error) {
+      console.error('밈 목록 로드 실패:', error);
+    } finally {
+      setMemesLoading(false);
+    }
+  };
+
+  // IntersectionObserver로 무한스크롤 구현
+  useEffect(() => {
+    if (!memesObserverTarget.current) return;
+    if (uploadedMemes.length >= memesTotal) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !memesLoading) {
+          loadMoreMemes();
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    const currentTarget = memesObserverTarget.current;
+    if (currentTarget) {
+      observer.observe(currentTarget);
+    }
+
+    return () => {
+      if (currentTarget) {
+        observer.unobserve(currentTarget);
+      }
+    };
+  }, [uploadedMemes.length, memesTotal, memesLoading]);
+
 
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [currentTab, setCurrentTab] = useState(0);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const isSocial = Boolean((myUser as any)?.socialLogin);
 
   const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
@@ -822,6 +888,20 @@ const MyPage = () => {
                       >
                         프로필 수정
                       </Button>
+                      {!isSocial && (
+                        <Button
+                          variant="text"
+                          size="small"
+                          onClick={() => setShowChangePasswordModal(true)}
+                          sx={{
+                            color: '#9333EA',
+                            fontSize: '0.875rem',
+                            '&:hover': { bgcolor: 'rgba(147, 51, 234, 0.08)' },
+                          }}
+                        >
+                          비밀번호 변경
+                        </Button>
+                      )}
                       <IconButton size="small" onClick={handleMenuOpen} sx={{ color: '#6B7280' }}>
                         <MoreVertical size={20} />
                       </IconButton>
@@ -979,19 +1059,28 @@ const MyPage = () => {
           )}
 
           {currentTab === 1 && uploadedMemes.length > 0 && (
-            <MasonryGrid>
-              {uploadedMemes.map((meme) => (
-                <MemeCard
-                  key={meme.id}
-                  id={meme.id}
-                  gifUrl={meme.gifUrl}
-                  tags={meme.tags}
-                  viewCount={meme.viewCount}
-                  likeCount={meme.likeCount}
-                  isFavorite={false}
-                />
-              ))}
-            </MasonryGrid>
+            <>
+              <MasonryGrid>
+                {uploadedMemes.map((meme) => (
+                  <MemeCard
+                    key={meme.id}
+                    id={meme.id}
+                    gifUrl={meme.gifUrl}
+                    tags={meme.tags}
+                    viewCount={meme.viewCount}
+                    likeCount={meme.likeCount}
+                    isFavorite={false}
+                  />
+                ))}
+              </MasonryGrid>
+              
+              {/* 무한스크롤 트리거 */}
+              {uploadedMemes.length < memesTotal && (
+                <Box ref={memesObserverTarget} sx={{ textAlign: 'center', py: 4 }}>
+                  {memesLoading && <Typography variant="body2" color="text.secondary">로딩 중...</Typography>}
+                </Box>
+              )}
+            </>
           )}
         </Box>
       </Container>
@@ -1001,6 +1090,12 @@ const MyPage = () => {
         isOpen={showPasswordModal}
         onClose={() => setShowPasswordModal(false)}
         onConfirm={handlePasswordConfirm}
+      />
+
+      {/* 비밀번호 변경 모달 */}
+      <ChangePasswordModal
+        open={showChangePasswordModal}
+        onClose={() => setShowChangePasswordModal(false)}
       />
 
       {/* 계정 삭제 다이얼로그 */}

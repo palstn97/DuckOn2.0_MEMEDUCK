@@ -2,12 +2,14 @@ import { createBrowserRouter } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import UploadPage from './pages/UploadPage';
 import MyPage from './pages/MyPage';
+import OtherUserPage from './pages/OtherUserPage';
 import SearchResultPage from './pages/SearchResultPage';
 import MemeDetailPage from './pages/MemeDetailPage';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import OAuth2RedirectHandler from './pages/OAuth2RedirectHandler';
 import LeaderboardPage from './pages/LeaderboardPage';
+import NotFoundPage from './pages/NotFoundPage';
 
 export const router = createBrowserRouter([
   {
@@ -21,6 +23,10 @@ export const router = createBrowserRouter([
   {
     path: '/mypage',
     element: <MyPage />,
+  },
+  {
+    path: '/user/:userId',
+    element: <OtherUserPage />,
   },
   {
     path: '/leaderboard',
@@ -50,4 +56,8 @@ export const router = createBrowserRouter([
   //   path: '/tag/:tagName',
   //   element: <TagPage />,
   // },
+  {
+    path: '*',
+    element: <NotFoundPage />,
+  },
 ]);

@@ -3,6 +3,7 @@ import type { MyUser } from "../../../types/mypage";
 import { fetchMyProfile, updateUserProfile } from "../../../api/userService";
 import { Camera } from "lucide-react";
 import { useUserStore } from "../../../store/useUserStore";
+import { Dialog } from "@headlessui/react";
 
 export type EditProfileCardProps = {
   user: MyUser;
@@ -12,24 +13,18 @@ export type EditProfileCardProps = {
 
 const DEFAULT_IMG = "/default_image.png";
 
-// 영문/숫자/특수문자 각 1개 이상 + 공백 불가 + 8자 이상
-const PASSWORD_REGEX = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9])\S{8,}$/;
 
 const EditProfileCard = ({ user, onCancel, onUpdate }: EditProfileCardProps) => {
   const [nickname, setNickname] = useState(user.nickname);
   const [profileImage, setProfileImage] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string>(user.imgUrl ?? DEFAULT_IMG);
   const [showImageOptions, setShowImageOptions] = useState(false);
-  const [, setDidPickNewImage] = useState(false);
-
-  // 소셜 로그인 여부 (true면 소셜)
-  const isSocial = !!(user as any).socialLogin;
-
-  // 비밀번호 관련 상태 (일반 로그인 사용자에게만 의미 있음)
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [newPasswordError, setNewPasswordError] = useState("");
-  const [confirmPasswordError, setConfirmPasswordError] = useState("");
+  const [shouldResetToDefault, setShouldResetToDefault] = useState(false);
+  const [errorDialog, setErrorDialog] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+  }>({ open: false, title: '', message: '' });
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -40,12 +35,14 @@ const EditProfileCard = ({ user, onCancel, onUpdate }: EditProfileCardProps) => 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // 8MB = 8 * 1024 * 1024 bytes
-      const MAX_SIZE = 8 * 1024 * 1024;
+      const MAX_SIZE = 5 * 1024 * 1024; // 5MB
       
       if (file.size > MAX_SIZE) {
-        alert("이미지 용량이 너무 큽니다. 8MB 이하의 이미지를 선택해주세요.");
-        // 파일 입력 초기화
+        setErrorDialog({
+          open: true,
+          title: '파일 용량 초과',
+          message: `이미지 용량이 너무 큽니다.\n\n파일 크기: ${(file.size / 1024 / 1024).toFixed(2)}MB\n최대 허용: 5MB\n\n더 작은 이미지를 선택해주세요.`,
+        });
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
@@ -55,17 +52,15 @@ const EditProfileCard = ({ user, onCancel, onUpdate }: EditProfileCardProps) => 
       setProfileImage(file);
       setPreviewUrl(URL.createObjectURL(file));
       setShowImageOptions(false);
-      setDidPickNewImage(true);
+      setShouldResetToDefault(false);
     }
   };
 
   const handleResetToDefaultImage = () => {
     setPreviewUrl(DEFAULT_IMG);
-    setProfileImage(null); // 파일 선택 취소
+    setProfileImage(null);
     setShowImageOptions(false);
-    setDidPickNewImage(false);
-    // ⚠️ 서버에 실제 삭제 플래그를 보내려면 백엔드 스펙 필요.
-    // 현재는 로컬 미리보기만 기본으로 전환.
+    setShouldResetToDefault(true);
   };
 
   const handleCameraClick = () => {
@@ -77,23 +72,6 @@ const EditProfileCard = ({ user, onCancel, onUpdate }: EditProfileCardProps) => 
   };
 
   const handleSubmit = async () => {
-    // 소셜 로그인 계정은 비밀번호 검증 자체를 생략
-    if (!isSocial) {
-      if (newPassword) {
-        if (!PASSWORD_REGEX.test(newPassword)) {
-          setNewPasswordError("영문, 숫자, 특수문자를 각각 1자 이상 포함하고 최소 8자여야 합니다.");
-          return;
-        } else {
-          setNewPasswordError("");
-        }
-        if (newPassword !== confirmPassword) {
-          setConfirmPasswordError("새 비밀번호와 확인이 일치하지 않습니다.");
-          return;
-        } else {
-          setConfirmPasswordError("");
-        }
-      }
-    }
 
     // ─────────────────────────────────────────────
     // FormData: 바뀐 값만, 그리고 profileImg는 "선택했을 때만" 포함
@@ -108,15 +86,20 @@ const EditProfileCard = ({ user, onCancel, onUpdate }: EditProfileCardProps) => 
     // (필요시) 언어 필드 – 고정값이 꼭 필요한 스펙이면 유지
     // fd.append("language", "ko");
 
-    if (!isSocial && newPassword) {
-      fd.append("newPassword", newPassword);
-    }
-
-    if (profileImage && profileImage.size > 0) {
+    // 기본 이미지로 변경하는 경우: 실제 default_image.png 파일 전송
+    if (shouldResetToDefault) {
+      try {
+        const response = await fetch('/default_image.png');
+        const blob = await response.blob();
+        fd.append("profileImg", blob, "default_image.png");
+      } catch (error) {
+        console.error('기본 이미지 로드 실패:', error);
+        // 기본 이미지 로드 실패 시 빈 Blob 전송
+        fd.append("profileImg", new Blob([]), "default.png");
+      }
+    } else if (profileImage && profileImage.size > 0) {
       fd.append("profileImg", profileImage);
     }
-    // ⚠️ 파일을 고르지 않았다면 profileImg는 절대 append하지 않음
-    //    (서버가 기본이미지로 리셋하는 문제 방지)
 
     try {
       await updateUserProfile(fd);
@@ -140,45 +123,22 @@ const EditProfileCard = ({ user, onCancel, onUpdate }: EditProfileCardProps) => 
 
       // 상위로 반영
       onUpdate(next);
-
-      // 비밀번호 입력 초기화
-      setNewPassword("");
-      setConfirmPassword("");
     } catch (err) {
-      console.error(err);
-      alert("프로필 수정 중 오류가 발생했습니다.");
+      setErrorDialog({
+        open: true,
+        title: '프로필 수정 실패',
+        message: '프로필 수정 중 오류가 발생했습니다.\n다시 시도해주세요.',
+      });
     }
   };
 
-  const handleNewPasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setNewPassword(val);
 
-    if (val && !PASSWORD_REGEX.test(val)) {
-      setNewPasswordError("영문, 숫자, 특수문자를 각각 1자 이상 포함하고 최소 8자여야 합니다.");
-    } else {
-      setNewPasswordError("");
-    }
-
-    if (confirmPassword && val !== confirmPassword) {
-      setConfirmPasswordError("비밀번호가 일치하지 않습니다.");
-    } else {
-      setConfirmPasswordError("");
-    }
-  };
-
-  const handleConfirmPasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setConfirmPassword(val);
-
-    if (newPassword && newPassword !== val) {
-      setConfirmPasswordError("비밀번호가 일치하지 않습니다.");
-    } else {
-      setConfirmPasswordError("");
-    }
+  const handleCloseErrorDialog = () => {
+    setErrorDialog({ open: false, title: '', message: '' });
   };
 
   return (
+    <>
     <div className="bg-white rounded-xl px-4 sm:px-8 py-6 mb-10 w-full max-w-[880px] mx-auto shadow-sm">
       {/* 헤더 */}
       <div className="flex justify-between items-center mb-6">
@@ -297,48 +257,42 @@ const EditProfileCard = ({ user, onCancel, onUpdate }: EditProfileCardProps) => 
             </div>
           </div>
 
-          {/* 일반 로그인만 비밀번호 변경 표시 */}
-          {!isSocial ? (
-            <>
-              {/* 새 비밀번호 */}
-              <div className="grid grid-cols-1 sm:grid-cols-[8rem,1fr] items-start gap-2 sm:gap-3">
-                <label className="text-gray-500 font-medium pt-2">새 비밀번호</label>
-                <div className="min-w-0 flex-1">
-                  <input
-                    type="password"
-                    className="w-full rounded-lg border border-gray-200 px-2 py-1"
-                    value={newPassword}
-                    onChange={handleNewPasswordChange}
-                    placeholder="영문/숫자/특수문자 포함, 8자 이상"
-                  />
-                  {newPasswordError && (
-                    <p className="text-red-500 text-xs mt-1">{newPasswordError}</p>
-                  )}
-                </div>
-              </div>
-
-              {/* 비밀번호 확인 */}
-              <div className="grid grid-cols-1 sm:grid-cols-[8rem,1fr] items-start gap-2 sm:gap-3">
-                <label className="text-gray-500 font-medium pt-2">비밀번호 확인</label>
-                <div className="min-w-0 flex-1">
-                  <input
-                    type="password"
-                    className="w-full rounded-lg border border-gray-200 px-2 py-1"
-                    value={confirmPassword}
-                    onChange={handleConfirmPasswordChange}
-                  />
-                  {confirmPasswordError && (
-                    <p className="text-red-500 text-xs mt-1">{confirmPasswordError}</p>
-                  )}
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="text-xs text-gray-500">소셜 로그인 계정은 여기서 비밀번호를 변경할 수 없습니다.</div>
-          )}
         </div>
       </div>
     </div>
+
+    {/* 에러 알림 Dialog */}
+    <Dialog
+      open={errorDialog.open}
+      onClose={handleCloseErrorDialog}
+      className="relative z-50"
+    >
+      <div className="fixed inset-0 bg-black/30" aria-hidden="true" />
+      
+      <div className="fixed inset-0 flex items-center justify-center p-4">
+        <Dialog.Panel className="mx-auto max-w-sm w-full bg-white rounded-2xl shadow-xl">
+          <div className="p-6">
+            <Dialog.Title className="text-lg font-bold text-center text-red-600 mb-4">
+              {errorDialog.title}
+            </Dialog.Title>
+            
+            <p className="text-sm text-gray-600 text-center whitespace-pre-line leading-relaxed mb-6">
+              {errorDialog.message}
+            </p>
+            
+            <div className="flex justify-center">
+              <button
+                onClick={handleCloseErrorDialog}
+                className="px-6 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition min-w-[100px]"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </Dialog.Panel>
+      </div>
+    </Dialog>
+    </>
   );
 };
 

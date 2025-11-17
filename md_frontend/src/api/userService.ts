@@ -4,21 +4,30 @@ import type { UserRank } from "../types";
 
 // 현재 사용자 정보 조회
 export const fetchMyProfile = async (): Promise<MyUser> => {
-  const response = await api.get<MyUser>("/users/me");
+  const response = await api.get<MyUser>("/me");
   return response.data;
 };
 
 // 타 유저 정보 조회
 export const fetchOtherUserProfile = async (
-  userId: string
+  otherUserId: string,
+  myUserIdOrNull?: string | null
 ): Promise<OtherUser> => {
-  const response = await api.get<OtherUser>(`/users/${userId}`);
+  const params: Record<string, string> = {};
+  if (myUserIdOrNull) {
+    params.myUserIdOrNull = myUserIdOrNull;
+  }
+  
+  const response = await api.get<OtherUser>(`/users/${otherUserId}`, {
+    params,
+    skipAuth: true, // JWT 필요 없음 (공개 API)
+  });
   return response.data;
 };
 
 // 비밀번호 검증 (일반 로그인 계정)
 export const verifyPassword = async (password: string): Promise<boolean> => {
-  const res = await api.post<{ valid: boolean }>("/users/me/verify-password", { password });
+  const res = await api.post<{ valid: boolean }>("/me/verify-password", { password });
   return res.data?.valid === true;
 };
 
@@ -43,8 +52,20 @@ export const updateUserProfile = async (formData: FormData): Promise<MyUser> => 
     fd.append(key, value as any);
   }
 
-  const res = await api.patch<MyUser>("/users/me", fd);
+  const res = await api.patch<MyUser>("/me", fd);
   return res.data;
+};
+
+// 비밀번호 변경 API
+export const changePassword = async (
+  currentPassword: string,
+  newPassword: string
+): Promise<{ status: number; message: string; data?: string }> => {
+  const response = await api.patch("/me/password", {
+    currentPassword,
+    newPassword,
+  });
+  return response.data;
 };
 
 // 리더보드 유저 타입
