@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -30,6 +31,7 @@ import java.util.stream.Collectors;
 public class MemeServiceImpl implements MemeService {
 
     private final MemeS3Service memeS3Service;
+    private final SearchService searchService;
     private final MemeRepository memeRepository;
     private final TagRepository tagRepository;
     private final MemeTagRepository memeTagRepository;
@@ -160,7 +162,24 @@ public class MemeServiceImpl implements MemeService {
 
         log.info("✅ Meme created: id={}, url={}", meme.getId(), meme.getImageUrl());
 
-        // 4) 응답용 DTO 생성 (프론트와 1:1 매칭)
+        // 4) OpenSearch 인덱싱
+        try {
+            ImageDocument imageDocument = ImageDocument.builder()
+                    .s3_url(meme.getImageUrl())
+                    .object_key(upload.getKey())
+                    .tags(new ArrayList<>(normalizedTags))
+                    .created_at(meme.getCreatedAt())
+                    .build();
+
+            searchService.indexImage(imageDocument);
+            log.info("✅ [OpenSearch] Meme indexed successfully: object_key={}", upload.getKey());
+        } catch (IOException e) {
+            log.error("❌ [OpenSearch] Failed to index meme: object_key={}, error={}",
+                    upload.getKey(), e.getMessage(), e);
+            // OpenSearch 인덱싱 실패해도 밈 생성은 성공으로 처리
+        }
+
+        // 5) 응답용 DTO 생성 (프론트와 1:1 매칭)
         MemeCreateResponseDTO.MemeInfoDTO dto = MemeCreateResponseDTO.MemeInfoDTO.builder()
                 .memeId(meme.getId())
                 .imageUrl(meme.getImageUrl())
