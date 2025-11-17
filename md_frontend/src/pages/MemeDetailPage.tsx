@@ -12,7 +12,7 @@ import {
   IconButton,
 } from "@mui/material";
 import {
-  Heart,
+  Star,
   Download,
   Share2,
   Calendar,
@@ -25,7 +25,8 @@ import { getMediaInfo, formatDuration } from "../utils/mediaUtils";
 import { useFavoriteMemes } from "../hooks/useFavoriteMemes";
 import { fetchMemeDetail, logMemeUsage } from "../api/memeService";
 import ShareModal from "../components/common/ShareModal";
-
+import { getAccessToken } from "../api/axiosInstance";
+import LoginModal from "../components/common/LoginModal";
 
 type MemeDetail = {
   id: string;
@@ -48,6 +49,10 @@ const MemeDetailPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
+  const isLoggedIn = !!getAccessToken();
+
+  const [showLoginModal, setShowLoginModal] = useState(false);
+
   // 좋아요(즐겨찾기)
   const { favoriteIds, toggleFavorite } = useFavoriteMemes();
   const isFavorited = id ? favoriteIds.has(id) : false;
@@ -55,6 +60,7 @@ const MemeDetailPage = () => {
   // API로 받아온 밈
   const [meme, setMeme] = useState<MemeDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [displayLikeCount, setDisplayLikeCount] = useState<number>(0);
 
   // 프론트에서 추가로 계산하는 메타데이터
   const [videoDuration, setVideoDuration] = useState<string | null>(null);
@@ -82,12 +88,13 @@ const MemeDetailPage = () => {
           dimensions: null,
           duration: null,
           uploader: {
-            id: String(data.creator?.id ?? ""),
+            id: data.creator?.userId ?? "",  // 계정 ID (문자열)
             nickname: data.creator?.nickname ?? "알 수 없음",
             profileImage: data.creator?.imgUrl ?? "",
           },
         };
         setMeme(mapped);
+        setDisplayLikeCount(mapped.likeCount);
       } catch (e) {
         console.error("밈 디테일 가져오기 실패:", e);
       } finally {
@@ -175,7 +182,14 @@ const MemeDetailPage = () => {
 
   // 좋아요 토글
   const handleLike = () => {
-    if (!id) return;
+    if (!isLoggedIn) {
+      setShowLoginModal(true);
+      return;
+    }
+
+    if (!id || !meme) return;
+    const already = isFavorited;
+    setDisplayLikeCount((prev) => prev + (already ? -1 : 1));
     toggleFavorite(id);
   };
 
@@ -209,11 +223,11 @@ const MemeDetailPage = () => {
     setIsShareOpen(true)
   }
 
-  // // 업로더 클릭
-  // const handleUploaderClick = () => {
-  //   if (!meme) return;
-  //   navigate(`/user/${meme.uploader.id}`);
-  // };
+  // 업로더 클릭
+  const handleUploaderClick = () => {
+    if (!meme) return;
+    navigate(`/user/${meme.uploader.id}`);
+  };
 
   // 로딩 화면
   if (loading || !meme) {
@@ -317,7 +331,14 @@ const MemeDetailPage = () => {
               <Button
                 variant="contained"
                 size="large"
-                startIcon={<Heart size={20} fill={isFavorited ? "white" : "none"} />}
+                startIcon={
+                  <Star
+                    size={20}
+                    strokeWidth={2.5}
+                    color={isFavorited ? "#facc15" : "white"}
+                    fill={isFavorited ? "#facc15" : "transparent"}
+                  />
+                }
                 onClick={handleLike}
                 sx={{
                   flex: 1,
@@ -337,7 +358,7 @@ const MemeDetailPage = () => {
                   transition: "all 0.3s ease",
                 }}
               >
-                좋아요 {(meme.likeCount + (isFavorited ? 1 : 0)).toLocaleString()}
+                좋아요 {displayLikeCount.toLocaleString()}
               </Button>
 
               <Button
@@ -406,18 +427,18 @@ const MemeDetailPage = () => {
                 업로드한 유저
               </Typography>
               <Box
-                // onClick={handleUploaderClick}
+                onClick={handleUploaderClick}
                 sx={{
                   display: "flex",
                   alignItems: "center",
                   gap: 2,
-                  // cursor: "pointer",
+                  cursor: "pointer",
                   p: 2,
                   borderRadius: 3,
                   transition: "all 0.2s ease",
-                  // "&:hover": {
-                  //   bgcolor: "rgba(147, 51, 234, 0.05)",
-                  // },
+                  "&:hover": {
+                    bgcolor: "rgba(147, 51, 234, 0.05)",
+                  },
                 }}
               >
                 <Avatar
@@ -596,6 +617,8 @@ const MemeDetailPage = () => {
         onClose={() => setIsShareOpen(false)} 
         link={window.location.href} 
       />
+
+      <LoginModal open={showLoginModal} onClose={() => setShowLoginModal(false)} />
     </Box>
   );
 };

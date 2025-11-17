@@ -45,7 +45,7 @@ public class RoomController {
     private final StringRedisTemplate stringRedisTemplate;
 
 
-    @Operation(summary = "방 생성",
+    @Operation(summary = "방 생성 (JWT 필요O)",
             description = "새로운 라이브 방송 방을 생성합니다. 프로필 사진과 배경 이미지를 포함할 수 있습니다.")
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<LiveRoomDTO> createRoom(
@@ -62,15 +62,8 @@ public class RoomController {
         return ResponseEntity.ok(room);
     }
 
-//    @Operation(summary = "방 조회",
-//            description = "특정 방의 정보를 조회합니다. 방 ID를 통해 방 정보를 가져옵니다.")
-//    @GetMapping("/{roomId}")
-//    public ResponseEntity<LiveRoomDTO> getRoom(@PathVariable Long roomId) {
-//        LiveRoomDTO room = liveRoomService.getRoom(roomId);
-//        return ResponseEntity.ok(room);
-//    }
 
-    @Operation(summary = "방 삭제",
+    @Operation(summary = "방 삭제 (JWT 필요O)",
             description = "특정 방을 삭제합니다. 방 ID와 아티스트 ID를 통해 방 정보를 삭제합니다.")
     @DeleteMapping("/{roomId}")
     public ResponseEntity<?> deleteRoom(@PathVariable Long roomId,
@@ -106,7 +99,7 @@ public class RoomController {
         return ResponseEntity.ok("방이 삭제되었습니다.");
     }
 
-    @Operation(summary = "방 제목 변경",
+    @Operation(summary = "방 제목 변경 (JWT 필요O)",
             description = "특정 방의 제목을 변경합니다. 방 ID와 새로운 제목을 받아서 방 정보를 갱신합니다.")
     @PatchMapping("/{roomId}/title")
     public ResponseEntity<?> updateRoomTitle(@PathVariable Long roomId,
@@ -148,7 +141,7 @@ public class RoomController {
     }
 
     // RoomController.java (일부 추가)
-    @Operation(summary = "플레이리스트 갱신(전체 교체/삭제/순서변경)",
+    @Operation(summary = "플레이리스트 갱신(전체 교체/삭제/순서변경) (JWT 필요O)",
             description = "전체 플레이리스트와 다음 재생 인덱스를 받아 방 상태를 갱신하고 브로드캐스트합니다.")
     @PostMapping("/{roomId}/playlist")
     public ResponseEntity<?> updatePlaylist(
@@ -221,7 +214,7 @@ public class RoomController {
 
 
 
-    @Operation(summary ="방 입장",
+    @Operation(summary ="방 입장 (JWT 필요X)",
             description = "특정 방을 입장합니다. 로그인한 유저, 로그인하지 않은 유저 모두 입장 가능합니다.\n"
                             + "잠겨있는 경우 에러 반환(입장질문 포함)하며 정답을 포함하여 재요청을 수행하면 됩니다.")
     @PostMapping("/{roomId}/enter")
@@ -291,7 +284,7 @@ public class RoomController {
         return ResponseEntity.ok(result);
     }
 
-    @Operation(summary = "방 퇴장", description = "현재 로그인한 사용자가 방에서 퇴장합니다.")
+    @Operation(summary = "방 퇴장 (JWT 필요X)", description = "현재 로그인한 사용자가 방에서 퇴장합니다.")
     @PostMapping("/{roomId}/exit")
     public ResponseEntity<?> exitRoom(
             @PathVariable Long roomId,
@@ -303,7 +296,7 @@ public class RoomController {
             redisService.removeUserFromRoom(
                     artistId.toString(),
                     roomId.toString(),
-                    principal.getUser()
+                    principal.getUser().getUserId()
             );
         }else{
             redisService.decreaseParticipantCountFromRoom(roomId.toString());
@@ -318,11 +311,11 @@ public class RoomController {
         return ResponseEntity.ok("방에서 퇴장하였습니다.");
     }
 
-    @Operation(summary = "방 강퇴", description = "방장이 현재 접속한 사용자를 방에서 강제 퇴장합니다.")
-    @PostMapping("/{roomId}/eject/{nickname}")
+    @Operation(summary = "방 강퇴 (JWT 필요O)", description = "방장이 현재 접속한 사용자를 방에서 강제 퇴장합니다.")
+    @PostMapping("/{roomId}/eject/{targetId}")
     public ResponseEntity<?> ejectUserFromRoom(
             @PathVariable Long roomId,
-            @PathVariable String nickname,
+            @PathVariable String targetId,
             @RequestParam Long artistId,
             @AuthenticationPrincipal CustomUserPrincipal principal
     ) {
@@ -339,20 +332,20 @@ public class RoomController {
             throw new CustomException("호스트만 강제퇴장 시킬 수 있습니다.", HttpStatus.FORBIDDEN);
         }
 
-        User target = userService.findByNickname(nickname);
+//        User target = userService.findByNickname(nickname);
         
         
         //강퇴 대상 user에게 강퇴 메세지 전송
-        messagingTemplate.convertAndSendToUser(target.getUserId(),"/queue/kick",roomId);
+        messagingTemplate.convertAndSendToUser(targetId,"/queue/kick",roomId);
 
         redisService.removeUserFromRoom(
                 artistId.toString(),
                 roomId.toString(),
-                target
+                targetId
         );
 
         String bannedKey = "room:" + roomId + ":banned";
-        stringRedisTemplate.opsForSet().add(bannedKey, target.getUserId());
+        stringRedisTemplate.opsForSet().add(bannedKey, targetId);
         stringRedisTemplate.expire(bannedKey, Duration.ofHours(6));
 
         long participantCount = redisService.getRoomUserCount(roomId.toString());
@@ -364,7 +357,7 @@ public class RoomController {
         return ResponseEntity.ok("방에서 강퇴하였습니다.");
     }
 
-    @Operation(summary = "방 목록 조회", description = "현재 존재하는 모든 방 목록을 조회합니다.")
+    @Operation(summary = "방 목록 조회 (JWT 필요X)", description = "현재 존재하는 모든 방 목록을 조회합니다.")
     @GetMapping
     public ResponseEntity<Map<String, Object>> getAllRoomSummaries(@RequestParam Long artistId) {
         List<LiveRoomSummaryDTO> rooms = redisService.getAllRoomSummaries(artistId);
@@ -375,7 +368,7 @@ public class RoomController {
         return ResponseEntity.ok(response);
     }
 
-    @Operation(summary = "홈 화면 아티스트별 라이브룸 조회", 
+    @Operation(summary = "홈 화면 아티스트별 라이브룸 조회 (JWT 필요X)",
            description = "홈 화면에 표시할 랜덤 아티스트와 각 아티스트의 인기 라이브룸을 조회합니다. (참여자 수 내림차순)")
     @GetMapping("/home")
     public ResponseEntity<Map<String, Object>> getHomeRooms(
@@ -399,7 +392,7 @@ public class RoomController {
     }
 
     @Operation(
-            summary = "트렌딩 방 조회(페이징)",
+            summary = "트렌딩 방 조회(페이징) (JWT 필요X)",
             description = "참여자(시청자) 수가 많은 순으로 트렌딩 방을 페이지 단위로 조회합니다."
     )
     @GetMapping("/trending")

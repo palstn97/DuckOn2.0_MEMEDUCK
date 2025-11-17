@@ -19,6 +19,9 @@ import {sendPageView} from "./analytics";
 import RoomListPage from "./pages/RoomListPage";
 import TitleManager from "./TitleManager";
 import LeaderboardPage from "./pages/LeaderboardPage";
+import AppChatRecommandPage from "./pages/ArtistDetailPage/AppChatRecommandPage";
+import FollowedArtistsPage from "./pages/ArtistDetailPage/FollowedArtistsPage";
+import PrivacyPage from "./pages/PrivacyPage";
 
 function RouteChangeTracker() {
   const loc = useLocation();
@@ -50,13 +53,16 @@ function App() {
             {/* <Route path="/room-list" element={<RoomListPage />}></Route> */}
             <Route path="/artist-list" element={<ArtistListPage />} />
             <Route path="/room-list" element={<RoomListPage />} />
+            <Route path="/followed-artists" element={<FollowedArtistsPage />} />
           </Route>
 
           {/* 레이아웃이 필요 없는 페이지들 */}
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/live/:roomId" element={<LiveRoomPage />} />
+          <Route path="/artist/:artistId/fan" element={<AppChatRecommandPage />} />
           <Route path="oauth2/success" element={<OAuth2RedirectHandler />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
 
           {/* 404 페이지 */}
           <Route path="*" element={<NotFoundPage />} />
