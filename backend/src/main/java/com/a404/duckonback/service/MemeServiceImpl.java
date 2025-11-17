@@ -232,27 +232,29 @@ public class MemeServiceImpl implements MemeService {
     }
 
     @Override
-    public List<FavoriteMemeDTO> getMyFavoriteMemes(Long userId, int page, int size) {
+    public MemeResponseDTO getMyFavoriteMemes(Long userId, int page, int size) {
         int safePage = Math.max(page, 1);
         int safeSize = Math.max(size, 1);
 
         // 페이지 요청
         PageRequest pageable = PageRequest.of(safePage - 1, safeSize);
-        Page<MemeFavorite> favPage = memeFavoriteRepository.findByUser_IdOrderByCreatedAtDesc(userId, pageable);
+        Page<MemeFavorite> pageResult = memeFavoriteRepository.findByUser_IdOrderByCreatedAtDesc(userId, pageable);
+        long total = pageResult.getTotalElements();
 
-
-        return favPage.getContent().stream()
-                .map(mf -> {
-                    var meme = mf.getMeme();
-                    return FavoriteMemeDTO.builder()
-                            .memeId(meme.getId())
-                            .memeUrl(meme.getImageUrl())
-                            .favoritedAt(mf.getCreatedAt())
-                            .build();
-                })
+        List<MemeItemDTO> items = pageResult.getContent().stream()
+                .map(m -> MemeItemDTO.builder()
+                        .memeId(m.getMeme().getId())
+                        .memeUrl(m.getMeme().getImageUrl())
+                        .build())
                 .toList();
-    }
 
+        return MemeResponseDTO.builder()
+                .page(safePage)
+                .size(safeSize)
+                .total(Math.toIntExact(total))
+                .items(items)
+                .build();
+    }
 
     @Override
     @Transactional(readOnly = true)
