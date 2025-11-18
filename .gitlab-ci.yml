@@ -37,6 +37,12 @@ cache:
 .default_tags: &default_tags
   tags: ["duckon","dind"]
 
+# AWS CLI + jq 공통 before_script (멀티라인 스크립트)
+.before_aws_cli: &before_aws_cli |
+  set -eo pipefail
+  curl -L -o /usr/local/bin/jq "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64"
+  chmod +x /usr/local/bin/jq
+
 # ───────────────────────────────────────────────────────────
 # BE 빌드
 # ───────────────────────────────────────────────────────────
@@ -117,8 +123,7 @@ deploy_frontend_prod:
     - job: build_frontend
       artifacts: true
   before_script:
-    - set -euo pipefail
-    - yum -y install jq
+    - *before_aws_cli
     - '[ -n "$AWS_ACCESS_KEY_ID_PROD" ] || { echo "Missing AWS creds"; exit 1; }'
     - '[ -n "$AWS_SECRET_ACCESS_KEY_PROD" ] || { echo "Missing AWS creds"; exit 1; }'
     - '[ -n "$AWS_REGION_PROD" ] || { echo "Missing region"; exit 1; }'
@@ -155,8 +160,7 @@ deploy_backend_prod:
     - when: never
   needs: [build_backend]
   before_script:
-    - set -eo pipefail
-    - yum -y install jq bash
+    - *before_aws_cli
     - '[ -n "$AWS_ACCESS_KEY_ID_PROD" ] || { echo "Missing: AWS_ACCESS_KEY_ID_PROD"; exit 1; }'
     - '[ -n "$AWS_SECRET_ACCESS_KEY_PROD" ] || { echo "Missing: AWS_SECRET_ACCESS_KEY_PROD"; exit 1; }'
     - '[ -n "$AWS_REGION_PROD" ] || { echo "Missing: AWS_REGION_PROD"; exit 1; }'
@@ -259,7 +263,7 @@ deploy_backend_prod:
     done
 
 # ───────────────────────────────────────────────────────────
-# DEV 배포 (SSH/PEM)
+# DEV 배포 (SSH/PEM) + 디스크 정리 자동화
 # ───────────────────────────────────────────────────────────
 deploy_dev:
   stage: deploy
@@ -288,6 +292,14 @@ deploy_dev:
     # 원격에서 실행할 스크립트를 만든다
     cat > remote-dev.sh <<'EOS'
     set -eux
+
+    echo "[maintenance] docker prune on dev"
+    docker builder prune -a -f || true
+    docker container prune -f || true
+    docker image prune -a -f || true
+    docker volume prune -f || true
+    docker network prune -f || true
+    docker system df -v || true
 
     # 1) 네트워크 보장
     NET=""
@@ -392,7 +404,6 @@ deploy_dev:
     scp -q remote-dev.sh dev-host:/tmp/remote-dev.sh
     ssh dev-host "bash /tmp/remote-dev.sh && rm -f /tmp/remote-dev.sh"
 
-
 # ───────────────────────────────────────────────────────────
 # Memeduck Frontend (Vite) — master→PROD, develop→DEV
 #  - MR(대상 master/develop): 빌드만
@@ -456,8 +467,7 @@ deploy_memeduck_front_dev:
         - .gitlab-ci.yml
     - when: never
   before_script:
-    - set -euo pipefail
-    - yum -y install jq
+    - *before_aws_cli
     - '[ -n "$AWS_ACCESS_KEY_ID_PROD" ] || { echo "Missing AWS creds"; exit 1; }'
     - '[ -n "$AWS_SECRET_ACCESS_KEY_PROD" ] || { echo "Missing AWS creds"; exit 1; }'
     - '[ -n "$AWS_REGION_PROD" ] || { echo "Missing region"; exit 1; }'
@@ -505,8 +515,7 @@ deploy_memeduck_front_prod:
         - .gitlab-ci.yml
     - when: never
   before_script:
-    - set -euo pipefail
-    - yum -y install jq
+    - *before_aws_cli
     - '[ -n "$AWS_ACCESS_KEY_ID_PROD" ] || { echo "Missing AWS creds"; exit 1; }'
     - '[ -n "$AWS_SECRET_ACCESS_KEY_PROD" ] || { echo "Missing AWS creds"; exit 1; }'
     - '[ -n "$AWS_REGION_PROD" ] || { echo "Missing region"; exit 1; }'
