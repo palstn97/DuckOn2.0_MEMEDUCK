@@ -1,267 +1,379 @@
-# MemeDuck 포팅 매뉴얼 (Docker & GitLab Runner)
+# DuckOn 포팅 매뉴얼
 
-> 이 문서는 GitLab 저장소를 클론한 뒤, 동일한 인프라에서 **빌드·배포**할 수 있도록 정리한 포팅 매뉴얼입니다.  
-> 운영/개발 환경 모두 Docker 기반으로 구성되며, **Nginx 리버스 프록시 하에 Backend(API)만 공개**됩니다.  
-> 프론트는 **React + Vite (웹)**, 모바일은 **Capacitor 앱**으로 구동됩니다.
+> 이 문서는 GitLab 저장소를 클론한 뒤, 동일한 인프라에서 **빌드·배포**할 수 있도록 정리한 포팅 매뉴얼입니다. 운영/개발 환경 모두 Docker 기반으로 구성되며, Nginx 리버스 프록시 하에 Front/Back/번역(선택) 서비스가 동작합니다.
 
 ---
 
 ## 0) 시스템 개요
 
-* **서비스명:** *MemeDuck – 라이브 방송 & 밈 생성·공유 플랫폼*
-* **아키텍처:**  
-  CloudFront ↔ S3(정적 웹) ↔ 브라우저/앱  
-  Nginx(리버스 프록시) ↔ **Back(Spring Boot)** ↔ RDS(MySQL), DocumentDB(Mongo), ElastiCache(Redis), OpenSearch, S3/CloudFront
-  *웹 프론트는 S3/CloudFront에 정적 배포, 모바일 앱은 Capacitor로 스토어 배포. 서버에는 **/api, WebSocket 엔드포인트만 노출***  
-* **배포 방식:** GitLab Runner on EC2, Docker 컨테이너 실행 (원격 SSH 스크립트)
-* **백엔드 API 엔드포인트 예:**  
-  `https://duckon.site/api/...`
+* **서비스명:** *DuckOn (덕온) – 실시간 팬 커뮤니티 (유튜브 동시 시청 + 실시간 채팅)*
+* ***아키텍처:***\* Nginx(리버스 프록시) ↔ Front(Nginx 정적서버) / Back(Spring Boot) / Translate(FastAPI, 선택) ↔ MySQL, MongoDB, Redis\*
+* ***배포 방식:***\* GitLab Runner on EC2, Docker 컨테이너 실행\*
+* ***도메인 예:***\* **`https://duckon.site`** (예시)\*
 
 ---
 
-## 1) 개발 도구·런타임 버전 및 설정
+## 1) 개발 도구·러untime 버전 및 설정
 
 ### 1.1 IDE & 언어/런타임
 
-* **Backend IDE:** IntelliJ IDEA (권장 최신)
-* **Java:** **JDK 17**
-* **Spring Boot:** 3.x (실제 버전은 `build.gradle` 참고)
-* **Gradle:** **Wrapper 사용(Yes)** – 레포 내 `gradlew`
+* **Backend IDE:** IntelliJ IDEA **2025.1.3**
 
-* **Frontend(Web/App):**
-  * **React:** 19.1.0
-  * **Vite:** 7.0.4
-  * **TypeScript:** ~5.8.3
-  * **Capacitor:** 7.4.4
-  * **React Router:** 7.7.0
-  * **상태/통신:** `@tanstack/react-query`, `axios`, `zustand`
-  * **애니메이션/UX:** `framer-motion`, `@headlessui/react`, `lucide-react`
-  * **실시간:** `@stomp/stompjs`, `sockjs-client`, `socket.io-client`
-  * **스타일링:** Tailwind CSS 4.x
+* **Java:** **JDK 21** (Gradle Toolchain 사용)
 
-> 이 프로젝트는 **React SPA + Capacitor 앱** 구조입니다.  
-> 서버 측 Nginx는 `/api` 및 WebSocket 경로 위주로 프록시를 설정하며, 정적 웹은 S3/CloudFront에 위치합니다.
+* **Spring Boot:** **3.5.3** (내장 Tomcat 10.x)
+
+* **Gradle:** Wrapper 포함 (레포 내 gradlew 사용)
+
+* **Frontend IDE:** VS Code (버전 무관, LTS 권장)
+
+* **Node.js:** 20.x LTS 이상 권장
+
+* **Vite:** ^7
+
+* **TypeScript:** \~5.8.3
 
 ### 1.2 웹서버 / WAS
 
-* **Reverse Proxy:** `nginx:alpine` (또는 `nginx:latest`)
-* **WAS:** Spring Boot 내장 Tomcat (포트 **8080** – 컨테이너 내부)
+* **Nginx (reverse proxy):** `nginx:alpine` 사용
+* **Front 정적서버:** `nginx:alpine` (프론트 빌드 산출물 서빙)
+* **WAS:** Spring Boot 내장 Tomcat (별도 설정 불필요)
 
 ### 1.3 DB/스토리지/캐시
 
-* **MySQL(RDS):** 8.x (RDS 엔드포인트 사용, 포트 **3306**)
-* **Redis(ElastiCache 또는 Docker):** 7.x (기본 포트 **6379**, VPC 내부 사용)
-* **DocumentDB(Mongo 호환):** 4.x대 (Mongo 호환, 기본 포트 **27017/27018**)
-* **Object Storage:**  **AWS S3** + **CloudFront**
-
-  * 일반 업로드 S3 버킷: `duckon-bucket`
-  * 밈 이미지 S3 버킷:
-    * dev: `memeduck-memes-dev`
-    * prod: `memeduck-memes-prod`
-  * 밈 CDN:
-    * dev: `https://dn9z1o6i8w44p.cloudfront.net`
-    * prod: `https://d23breqm38jov9.cloudfront.net`
+* **MySQL:** 8.0 (운영: 호스트 3307 → 컨테이너 3306)
+* **MongoDB:** latest (채팅 등 비정형 데이터)
+* **Redis:** 7-alpine (캐시/임시 데이터; dev: 6380, prod: 6379, 로컬바인드)
+* **Object Storage:** AWS S3 (이미지 업로드 등)
 
 ---
 
-## 2) 빌드 시 사용되는 환경변수
+## 2) 빌드 시 사용되는 환경변수 (예시)
 
-> 실제 값은 **환경변수/CI 변수**로 주입하세요.  
-> Git에 민감정보를 넣지 말고, **키 이름만 고정**해서 사용합니다.
+> 실제 값은 보안상 **예시**로 표기했습니다. `exec/.env.*` 또는 GitLab CI 변수/EC2 환경변수로 주입하세요.
 
 ### 2.1 Backend (Spring Boot)
 
-#### 2.1a `application.properties` 매핑 (민감정보 삭제형)
+```
+# 공통
+SPRING_PROFILES_ACTIVE=prod
+BASE_URL=https://duckon.site
+
+# DB
+SPRING_DATASOURCE_URL=jdbc:mysql://mysql-prod:3306/duckon?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Seoul
+SPRING_DATASOURCE_USERNAME=duckon
+SPRING_DATASOURCE_PASSWORD=********
+
+# Redis
+REDIS_HOST=redis-prod
+REDIS_PORT=6379
+
+# Mongo
+MONGO_URI=mongodb://duckon-mongo:27017/duckon
+
+# JWT
+JWT_SECRET=***long-random-secret***
+JWT_ACCESS_MINUTES=60
+JWT_REFRESH_DAYS=14
+
+# OAuth2 (예: Google/Naver/Kakao 사용 시)
+OAUTH_GOOGLE_CLIENT_ID=***
+OAUTH_GOOGLE_CLIENT_SECRET=***
+OAUTH_NAVER_CLIENT_ID=***
+OAUTH_NAVER_CLIENT_SECRET=***
+OAUTH_KAKAO_CLIENT_ID=***
+OAUTH_KAKAO_CLIENT_SECRET=***
+# 콜백 예) https://duckon.site/login/oauth2/code/google
+
+# CORS/프론트 URL
+CORS_ALLOWED_ORIGINS=https://duckon.site,https://www.duckon.site
+
+# S3 (AWS SDK v2)
+AWS_REGION=ap-northeast-2
+AWS_ACCESS_KEY_ID=***
+AWS_SECRET_ACCESS_KEY=***
+S3_BUCKET=duckon-bucket
+
+# Springdoc(OpenAPI)
+SPRINGDOC_SWAGGER_UI_ENABLED=true
+```
+
+#### 2.1a env.properties (실제 파일 키 명세)
+
+다음 파일에 **정확히 아래 키**를 채워주세요.
+
+`BE\src\main\resources\env.properties`
 
 ```properties
-spring.application.name=DuckOn-Back
+# ====================
+# JWT Configuration
+# ====================
+JWT_SECRET_KEY=changeme-64bytes-random
+# 단위: 밀리초(ms)
+JWT_ACCESS_EXPIRATION=3600000           # 60분
+JWT_REFRESH_EXPIRATION=1209600000       # 14일
 
-# --- Server Port ---
-server.port=8080
+# ====================
+# Database Configuration
+# ====================
+SPRING_DATASOURCE_URL=jdbc:mysql://mysql-prod:3306/duckon?useUnicode=true&characterEncoding=utf8mb4&serverTimezone=Asia/Seoul
+SPRING_DATASOURCE_USERNAME=duckon
+SPRING_DATASOURCE_PASSWORD=********
 
-# --- Database (MySQL) ---
-spring.datasource.url=${SPRING_DATASOURCE_URL}
-spring.datasource.username=${SPRING_DATASOURCE_USERNAME}
-spring.datasource.password=${SPRING_DATASOURCE_PASSWORD}
-spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+# Redis
+REDIS_HOST=redis-prod
+REDIS_PORT=6379
 
-# --- Redis ---
-spring.data.redis.host=${REDIS_HOST}
-spring.data.redis.port=${REDIS_PORT}
+# MongoDB (인증 미사용 시 ID/PW 비워두세요)
+MONGO_DB_URL=mongodb://duckon-mongo:27017
+MONGO_DB_NAME=duckon
+MONGO_DB_USERNAME=
+MONGO_DB_PASSWORD=
 
-# --- JPA ---
-spring.jpa.hibernate.ddl-auto=update
-spring.jpa.show-sql=true
-spring.jpa.properties.hibernate.format_sql=true
-spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQL8Dialect
+# ====================
+# OAuth2 Configuration (Google/Naver/Kakao)
+# 리다이렉트: https://duckon.site/login/oauth2/code/{google|naver|kakao}
+# ====================
+GOOGLE_ID=***
+GOOGLE_SECRET=***
+KAKAO_ID=***
+KAKAO_SECRET=***
+NAVER_ID=***
+NAVER_SECRET=***
+BASE_URL=https://duckon.site
 
-# --- OAuth2 ---
-app.frontend.oauth2-success-url=${BASE_URL}/oauth2/success
-app.frontend.oauth2-failure-url=${BASE_URL}/oauth2/failure
+# ====================
+# S3 Configuration
+# ====================
+S3_ACCESS_KEY=***
+S3_SECRET_KEY=***
+S3_REGION=ap-northeast-2
+S3_BUCKET_NAME=duckon-bucket
 
-spring.security.oauth2.client.registration.google.client-id=${GOOGLE_ID}
-spring.security.oauth2.client.registration.google.client-secret=${GOOGLE_SECRET}
-spring.security.oauth2.client.registration.google.redirect-uri={baseUrl}/login/oauth2/code/{registrationId}
-spring.security.oauth2.client.registration.google.authorization-grant-type=authorization_code
-spring.security.oauth2.client.registration.google.scope=profile,email
-spring.security.oauth2.client.registration.google.client-authentication-method=client_secret_basic
+# ====================
+# Blacklist Configuration
+# ====================
+BLACKLIST_HMAC_SECRET=changeme-hmac-secret
 
-spring.security.oauth2.client.registration.kakao.client-id=${KAKAO_ID}
-spring.security.oauth2.client.registration.kakao.client-secret=${KAKAO_SECRET}
-spring.security.oauth2.client.registration.kakao.redirect-uri={baseUrl}/login/oauth2/code/{registrationId}
-spring.security.oauth2.client.registration.kakao.client-authentication-method=client_secret_post
-spring.security.oauth2.client.registration.kakao.authorization-grant-type=authorization_code
-spring.security.oauth2.client.registration.kakao.scope=profile_nickname
+# ====================
+# Translation Service Configuration (선택)
+# ====================
+TRANSLATE_BASE_URL=http://duckon-translate:8089
+TRANSLATE_TIMEOUT_MS=2000
+```
 
-spring.security.oauth2.client.registration.naver.client-id=${NAVER_ID}
-spring.security.oauth2.client.registration.naver.client-secret=${NAVER_SECRET}
-spring.security.oauth2.client.registration.naver.redirect-uri={baseUrl}/login/oauth2/code/{registrationId}
-spring.security.oauth2.client.registration.naver.authorization-grant-type=authorization_code
-spring.security.oauth2.client.registration.naver.scope=name,email,profile_image
-spring.security.oauth2.client.registration.naver.client-authentication-method=client_secret_basic
+> 위 값들은 컨테이너 **ENV**로도 주입 가능합니다. (Docker `--env`/`--env-file`)  ENV가 있으면 `env.properties`보다 **우선 적용**됩니다.
 
-spring.security.oauth2.client.provider.google.authorization-uri=https://accounts.google.com/o/oauth2/v2/auth
-spring.security.oauth2.client.provider.google.token-uri=https://oauth2.googleapis.com/token
-spring.security.oauth2.client.provider.google.user-info-uri=https://openidconnect.googleapis.com/v1/userinfo
-spring.security.oauth2.client.provider.google.user-name-attribute=sub
+### 2.2 Frontend (Vite)
 
-spring.security.oauth2.client.provider.kakao.authorization-uri=https://kauth.kakao.com/oauth/authorize
-spring.security.oauth2.client.provider.kakao.token-uri=https://kauth.kakao.com/oauth/token
-spring.security.oauth2.client.provider.kakao.user-info-uri=https://kapi.kakao.com/v2/user/me
-spring.security.oauth2.client.provider.kakao.user-name-attribute=id
+`FE\.env`
+```
+VITE_API_BASE_URL=/api
+```
 
-spring.security.oauth2.client.provider.naver.authorization-uri=https://nid.naver.com/oauth2.0/authorize
-spring.security.oauth2.client.provider.naver.token-uri=https://nid.naver.com/oauth2.0/token
-spring.security.oauth2.client.provider.naver.user-info-uri=https://openapi.naver.com/v1/nid/me
-spring.security.oauth2.client.provider.naver.user-name-attribute=response
+### 2.3 Translate 서비스(FastAPI, 선택 배포)
 
-# --- JWT ---
-jwt.secret=${JWT_SECRET}
-jwt.access-exp=${JWT_ACCESS_EXP:900}
-jwt.refresh-exp=${JWT_REFRESH_EXP:1209600}
+```
+MODEL_ID=facebook/m2m100_418M
+REDIS_URL=redis://redis-prod:6379/0
+CACHE_TTL_SECONDS=604800
+MARIAN_OFF=0
+NLLB_FORCE_WORDS=0
+DEBUG=0
+WARMUP_TEXT=warm up
+MAX_CHARS=1000
+HF_TOKEN=*** (또는 HUGGINGFACE_HUB_TOKEN)
+```
 
-# --- S3 (일반 업로드) ---
-aws.s3.access-key=${S3_ACCESS_KEY}
-aws.s3.secret-key=${S3_SECRET_KEY}
-aws.s3.region=${S3_REGION}
-aws.s3.bucket-name=${S3_BUCKET_NAME}
+> 번역 서버는 **메모리 사용량이 높을 수 있음**. CPU 전용/경량 모델, `MAX_CHARS` 축소, `force_words` 제한 등으로 튜닝하거나 미사용(프록시 경로 비활성화) 권장.
 
-# --- Meme S3 / CDN ---
-meme.s3.bucket=${MEME_S3_BUCKET}
-meme.cdn.base-url=${MEME_CDN_BASE_URL}
+---
 
-# --- Multipart 설정 ---
-spring.servlet.multipart.max-file-size=30MB
-spring.servlet.multipart.max-request-size=30MB
-server.tomcat.max-part-count=100
-server.tomcat.max-swallow-size=30MB
-server.tomcat.max-http-form-post-size=30MB
+## 3) 빌드 & 패키징 절차
 
-# --- MongoDB / DocumentDB ---
-spring.data.mongodb.uri=${MONGO_DB_URL}
-spring.data.mongodb.username=${MONGO_DB_USERNAME}
-spring.data.mongodb.password=${MONGO_DB_PASSWORD}
-spring.data.mongodb.database=${MONGO_DB_NAME}
+### 3.1 Backend
 
-# --- Blacklist (JWT 블랙리스트 등) ---
-security.blacklist.hmac-secret=${BLACKLIST_HMAC_SECRET}
-security.blacklist.key-prefix=blacklist:
-
-# --- 인코딩 ---
-server.servlet.encoding.charset=UTF-8
-server.servlet.encoding.enabled=true
-server.servlet.encoding.force=true
-
-# --- Translate Service ---
-translate.base-url=${TRANSLATE_BASE_URL}
-translate.timeout-ms=${TRANSLATE_TIMEOUT_MS}
-
-# --- Spring Mail ---
-spring.mail.host=${SMTP_SERVER}
-spring.mail.port=${SMTP_PORT}
-spring.mail.username=${SMTP_ID}
-spring.mail.password=${SMTP_PW}
-spring.mail.properties.mail.smtp.auth=true
-spring.mail.properties.mail.smtp.ssl.enable=${SMTP_SSL:false}
-spring.mail.properties.mail.smtp.starttls.enable=${SMTP_STARTTLS:true}
-
-service.mail.from=${FROM_EMAIL}
-service.mail.brand=${MAIL_BRAND:DUCKON}
-service.email.code.ttl-seconds=${EMAIL_CODE_TTL_SECONDS:600}
-service.email.code.length=${EMAIL_CODE_LENGTH:6}
-service.email.rate-limit.send.per-10m=${EMAIL_SEND_PER_10M:5}
-service.email.rate-limit.verify.per-1h=${EMAIL_VERIFY_PER_1H:10}
-service.email.code.consume-on-success=${EMAIL_CONSUME_ON_SUCCESS:true}
-
-# --- OpenSearch ---
-opensearch.endpoint=${OPENSEARCH_ENDPOINT}
-opensearch.region=${OPENSEARCH_REGION}
-
-# --- Youtube API Key ---
-youtube.api.key=${YOUTUBE_API_KEY}
-
-# --- OpenAI ---
-openai.api-key=${OPENAI_API_KEY}
-openai.model=${OPENAI_MODEL:gpt-5-nano}
-
-3) 빌드 & 패키징 절차
-3.1 Backend
+```
 # 1) 소스 클론
-$ git clone <GITLAB_REPO_URL> memeduck
-$ cd memeduck/backend
-$ git checkout master   # 또는 main/prod 브랜치
+$ git clone <repo-url>
+$ cd backend
 
-# 2) JDK 17 확인 후 빌드
-$ chmod +x gradlew
+# 2) JDK 21 확인 후 빌드
 $ ./gradlew clean build -x test
-# 산출물: backend/build/libs/*.jar
+# 산출물: build/libs/app.jar (또는 {artifact}.jar)
 
-# 3) Docker 이미지 빌드 (prod 예시)
+# 3) Docker 이미지 빌드 (예)
 $ docker build -t duckonback:prod .
+```
 
-3.2 Frontend (React + Vite + Capacitor)
-# 로컬 개발자 용
-$ cd memeduck/frontend
-$ npm install
+### 3.2 Frontend
 
-# .env
-VITE_API_BASE_URL=https://duckon.site/api
-
-# 개발 서버
-$ npm run dev   # http://localhost:5173 등
-
-# 정적 빌드 (S3 업로드 산출물)
+```
+$ cd frontend
+$ npm ci
 $ npm run build
-# 산출물: frontend/dist/ → S3 정적 호스팅에 업로드
+# 산출물: dist/
 
-# Capacitor 앱 (선택)
-$ npx cap sync
-# 이후 Android Studio / Xcode에서 빌드 및 스토어 배포
+# Nginx 정적 서빙용 Docker 이미지 빌드 (예)
+$ docker build -t duckon-front:prod .
+```
 
-4) 런타임(배포) 구성
-4.1 현재/예상 컨테이너 구성
-- duckon-proxy         (nginx 리버스 프록시) :80
-- duckon-app-prod      (spring)             :8080 (프록시 뒤)
-- redis (또는 elasticache)                 :6379 (내부만)
-- mysql (RDS 사용 시 로컬 컨테이너 생략)
-- mongo (DocumentDB 사용 시 로컬 컨테이너 생략)
+### 3.3 Translate (선택)
 
+> **FastAPI 번역 서버**는 별도 컨테이너로 운영합니다. 메모리 사용량에 유의하세요.
 
-실제 운영은 **프록시 뒤의 백엔드 컨테이너 하나(duckon-app-prod)**만 활성 권장.
-테스트용 백엔드 컨테이너가 있다면 포트 충돌 및 리소스 낭비 방지를 위해 종료/정리합니다.
+#### 3.3.1 디렉터리 구조 (예시)
 
-4.2 Nginx 리버스 프록시 설정 예시
+* 레포 내: `duckon-translate/`
+* 서버(EC2) 운영 패키지(예시): `~/translate-dev`, `~/translate-prod`
 
-/etc/nginx/conf.d/duckon.conf
+```
+~/translate-dev
+├─ Dockerfile
+├─ requirements.txt
+├─ server.py
+└─ start.sh
+```
 
+#### 3.3.2 requirements.txt (고정 버전)
+
+> 파일 위치: `duckon-translate/requirements.txt`
+
+```text
+fastapi==0.112.0
+uvicorn[standard]==0.30.3
+transformers==4.41.2
+torch==2.3.1
+accelerate==0.33.0
+sentencepiece==0.2.0
+redis==5.0.7
+pydantic==2.8.2
+langdetect==1.0.9
+```
+
+#### 3.3.3 Dockerfile (예시)
+
+> 실제 운영 Dockerfile이 있다면 그 파일을 사용하세요. 아래는 **재현 가능한 최소 예시**입니다.
+
+```dockerfile
+# duckon-translate/Dockerfile
+FROM python:3.11-slim
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+WORKDIR /app
+
+# 시스템 의존성(필요 시 추가)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+ && rm -rf /var/lib/apt/lists/*
+
+# 의존성 설치
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 앱 소스
+COPY server.py ./
+
+# 기본 포트
+EXPOSE 8089
+
+# HEALTHCHECK(Optional): 빠른 헬스엔드포인트 사용 시
+HEALTHCHECK --interval=30s --timeout=5s --retries=5 CMD curl -fsS http://127.0.0.1:8089/ready || exit 1
+
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8089", "--workers", "1"]
+```
+
+#### 3.3.4 start.sh (예시)
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+uvicorn server:app --host 0.0.0.0 --port "${PORT:-8089}" --workers 1
+```
+
+> 컨테이너 CMD 대신 `start.sh`를 사용하려면 Dockerfile의 `CMD`를 `bash ./start.sh`로 교체하세요.
+
+#### 3.3.5 빌드 & 실행
+
+```bash
+# 1) 이미지 빌드
+$ cd duckon-translate
+$ docker build -t duckon-translate:latest .
+
+# 2) 실행 (공유 네트워크 사용 권장)
+$ docker network create duckon-net || true
+$ docker rm -f duckon-translate-dev || true
+$ docker run -d --name duckon-translate-dev \
+  --network duckon-net \
+  -p 8089:8089 \
+  -e MODEL_ID=facebook/m2m100_418M \
+  -e HF_TOKEN=*** \
+  -e REDIS_URL=redis://redis-prod:6379/0 \
+  -e CACHE_TTL_SECONDS=604800 \
+  -e MAX_CHARS=1000 \
+  duckon-translate:latest
+
+# 3) 헬스체크
+$ curl -s http://localhost:8089/health | jq .
+$ curl -s http://localhost:8089/ready
+```
+
+#### 3.3.6 Nginx 프록시(선택)
+
+```nginx
+# /translate 경로 프록시 (운영에서 비공개 권장)
+location /translate {
+    proxy_pass http://duckon-translate-dev:8089; # 컨테이너 이름/네트워크에 맞게 조정
+}
+```
+
+> **주의사항**
+>
+> * 모델 최초 로드 시 메모리 사용량이 큽니다. EC2 사양에 맞춰 `MAX_CHARS`와 워커 수를 조정하세요.
+> * HuggingFace 토큰(HF\_TOKEN)은 CI/CD 변수 또는 서버 비밀 파일로 주입하고, 저장소에 커밋하지 않습니다.
+
+---
+
+## 4) 런타임(배포) 구성
+
+### 4.1 현재 컨테이너(참고)
+
+```
+# 예시 (운영 EC2)
+- duckon-proxy (nginx:alpine) :80/:443
+- duckon-front-prod (nginx)    :80 (내부)
+- duckon-app-prod (spring)     :8080 (내부)
+- duckon-translate-dev         :8089 (선택, 필요 시 프록시 연결)
+- mysql-prod                   :3306 (호스트 3307)
+- duckon-mongo                 :27017
+- redis-prod                   :6379 (127.0.0.1 바인드)
+```
+
+### 4.2 Nginx 리버스 프록시 설정 예시
+
+> `duckon-proxy` 컨테이너의 `/etc/nginx/conf.d/duckon.conf`
+
+```nginx
 server {
     listen 80;
-    server_name duckon.site;
+    listen 443 ssl http2;  # 인증서 적용 시
+    server_name duckon.site www.duckon.site;
 
-    # 업로드 제한
-    client_max_body_size 30m;
+    # SSL 인증서 (예시)
+    ssl_certificate     /etc/letsencrypt/live/duckon.site/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/duckon.site/privkey.pem;
 
-    # API 프록시
+    # 업로드 제한 (413 방지)
+    client_max_body_size 20m;
+
+    # 정적(Front)
+    location / {
+        proxy_set_header Host $host;
+        proxy_pass http://duckon-front-prod:80;
+    }
+
+    # API (Back)
     location /api {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -269,261 +381,282 @@ server {
         proxy_pass http://duckon-app-prod:8080;
     }
 
-    # (선택) 헬스 경로 노출
-    location /actuator/health {
-        proxy_pass http://duckon-app-prod:8080/actuator/health;
+    # WebSocket
+    location /ws-chat {
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_pass http://duckon-app-prod:8080;
     }
 
-    # (선택) WebSocket/STOMP 경로
-    # location /ws {
-    #     proxy_http_version 1.1;
-    #     proxy_set_header Upgrade $http_upgrade;
-    #     proxy_set_header Connection "Upgrade";
-    #     proxy_set_header Host $host;
-    #     proxy_pass http://duckon-app-prod:8080;
+    # OAuth redirect (Spring Boot가 처리)
+    location /login/ {
+        proxy_pass http://duckon-app-prod:8080;
+    }
+
+    # (선택) 번역 서비스 공개 시
+    # location /translate {
+    #     proxy_pass http://duckon-translate:8089;
     # }
 }
+```
 
-4.3 Docker 실행 예시 (단일 노드)
-# 네트워크 준비
+### 4.3 Docker 실행 예시 (단일 노드)
+
+```bash
+# 네트워크 준비 (없으면 생성)
 $ docker network create duckon-net || true
 
-# 백엔드 컨테이너 (prod 예시)
-$ docker rm -f duckon-app-prod || true
-$ docker run -d --name duckon-app-prod \
-  --network duckon-net \
-  -p 8080:8080 \
-  -e SPRING_PROFILES_ACTIVE=prod \
-  -e SPRING_DATASOURCE_URL=$SPRING_DATASOURCE_URL \
-  -e SPRING_DATASOURCE_USERNAME=$SPRING_DATASOURCE_USERNAME \
-  -e SPRING_DATASOURCE_PASSWORD=$SPRING_DATASOURCE_PASSWORD \
-  -e REDIS_HOST=$REDIS_HOST \
-  -e REDIS_PORT=$REDIS_PORT \
-  -e MONGO_DB_URL=$MONGO_DB_URL \
-  -e MONGO_DB_NAME=$MONGO_DB_NAME \
-  duckonback:prod
+# Front/Back/DB/Cache/Mongo 실행 (이미지/이름은 운영 환경에 맞게 조정)
+$ docker run -d --name duckon-front-prod --network duckon-net duckon-front:prod
+$ docker run -d --name duckon-app-prod   --network duckon-net duckonback:prod
+$ docker run -d --name mysql-prod  -p 3307:3306 --network duckon-net \
+  -e MYSQL_ROOT_PASSWORD=*** -e MYSQL_DATABASE=duckon mysql:8.0
+$ docker run -d --name duckon-mongo -p 27017:27017 --network duckon-net mongo:latest
+$ docker run -d --name redis-prod   -p 127.0.0.1:6379:6379 --network duckon-net redis:7-alpine
+$ docker run -d --name duckon-proxy -p 80:80 -p 443:443 --network duckon-net nginx:alpine
+```
 
-# 프록시 컨테이너
-$ docker rm -f duckon-proxy || true
-$ docker run -d --name duckon-proxy \
-  --network duckon-net \
-  -p 80:80 \
-  -v /etc/nginx/conf.d:/etc/nginx/conf.d:ro \
-  nginx:alpine
+> 실제 운영에는 **GitLab Runner**를 통해 빌드/배포 자동화. Registry를 쓰는 경우 `docker login` → `docker push/pull` 구성.
 
+### 4.4 배포 시 특이사항
 
-운영 환경에서는 8080을 호스트에 직접 노출하지 않고, Nginx만 80/443을 외부에 개방하는 구성을 추천합니다.
+* **413 Request Entity Too Large** 발생 시: `client_max_body_size` 값을 10\~50MB 수준으로 상향.
+* **CORS**: 프론트 도메인(및 www 서브도메인) 모두 허용 설정 필요.
+* **OAuth 리다이렉트 URI**: `https://duckon.site/login/oauth2/code/{provider}` 를 각 콘솔에 등록.
+* **HTTPS 필수**: 소셜 로그인/쿠키 보안을 위해 TLS 적용 권장.
+* **WebSocket**: `Upgrade/Connection` 헤더 프록시 설정 필수.
+* **Translate 서비스**: 메모리 사용량 높음 → 운영에서는 **비활성** 또는 경량설정 권장.
 
-4.4 배포 시 특이사항
+---
 
-CORS
+### 4.5 GitLab CI/CD 배포 특이사항 (본 프로젝트)
 
-웹: https://duckon.site
+* **브랜치 전략**
 
-앱(Capacitor): capacitor://localhost 등
-위 도메인들을 Spring Security CORS 허용 오리진에 등록해야 합니다.
+  * `BE/develop`, `FE/develop` 푸시/머지 → 각각 빌드 후 원격 EC2에 **SSH**로 접속해 `docker build` → `duckon-app-dev(8080)`, `duckon-front-dev(8081→80)` 재기동.
+  * `master` → 프로덕션 빌드/배포: `duckon-app-prod`/`duckon-front-prod`를 **duckon-net** 네트워크에서 실행(프록시 뒤, 포트 바인딩 없음).
+* **원격 Git 갱신**: `git remote set-url origin https://gitlab-ci-token:${CI_JOB_TOKEN}@...` 후 `git reset --hard` 사용.
+  CI 토큰 만료/권한 문제 시 배포 실패 → **CI\_JOB\_TOKEN 유효성** 점검.
+* **환경파일 필수**: 원격 서버에 `/home/ubuntu/dev.env`, `/home/ubuntu/prod.env` 준비.
+  Spring은 컨테이너 ENV → `application.properties` → `env.properties` 순으로 덮어씀.
+* **도커 네트워크**: `duckon-net` 미존재 시 생성. Nginx 업스트림 이름(예: `duckon-app-prod`, `duckon-front-prod`)과 컨테이너 이름이 **일치**해야 프록시 가능.
+* **헬스체크**: 배포 스크립트에서 `https://duckon.site/api/actuator/health` HTTP 200/401 확인.
+  Actuator 노출 및 프록시 경로(`/api`) 확인 필요.
+* **TLS/WS**: 443 인증서 갱신 시 Nginx 재시작 필요. WebSocket은 `Upgrade/Connection` 헤더 필수.
+* **Nginx 업로드 한도**: 회원가입 이미지 등 대용량 업로드 시 `client_max_body_size 20m`(또는 요구 크기) 적용.
+* **DB 마이그레이션**: 최초 배포 전 `exec/db/*` 덤프 복원, MySQL **utf8mb4**, Asia/Seoul 타임존 권장.
+* **보안**: Redis는 127.0.0.1 바인드, 보안그룹으로 외부 차단. SSH `known_hosts` 최신화.
 
-HTTPS
+## 5) 프로젝트 설정 파일 & 계정/프로퍼티 파일 목록
 
-실제 서비스에서는 443/TLS(예: Let’s Encrypt/certbot, ACM)를 사용해야 쿠키/보안 기능 제약이 줄어듭니다.
+> **실제 비밀 값은 커밋 금지.** 아래는 위치·명칭 예시입니다.
 
-보안 그룹 / 네트워크
+* Backend
 
-RDS, DocumentDB, ElastiCache는 VPC 내부에서만 접근 가능하게 설정
+  * `src/main/resources/application.yml` 또는 `application.properties`
+  * `env.properties` (예: 비밀키/DB 접속 등, GitLab CI 변수로 대체 가능)
+* Frontend
 
-EC2 + Nginx만 80/443 포트 공개
+  * `.env`, `.env.production` (Vite 변수)
+* Infra
 
-CloudFront/S3
+  * `nginx/conf.d/duckon.conf` (리버스 프록시)
+  * `docker-compose.yml` (선택)
+* 기타
 
-Web은 CloudFront+S3에서 정적 제공
+  * `exec/erd.png` (ERD 이미지)
+  * `exec/schema.sql` (DDL/기본데이터)
 
-밈 이미지 등은 S3 업로드 후 CloudFront URL로 제공 (MEME_CDN_BASE_URL + object key)
+---
 
-5) GitLab CI/CD
+## 6) 외부 서비스 사용 정리
 
-브랜치 전략 (예시)
+### 6.1 소셜 인증 (Google / Naver / Kakao)
 
-develop / dev 브랜치:
+**반드시 포함할 내용**
 
-build → deploy(dev)
+1. 각 콘솔에서 앱 생성 및 **Client ID/Secret 발급**
+2. **Redirect URI** 등록: `https://duckon.site/login/oauth2/code/{google|naver|kakao}`
+3. `env.properties` 키 매핑: `GOOGLE_ID/SECRET`, `NAVER_ID/SECRET`, `KAKAO_ID/SECRET`, `BASE_URL`
 
-dev용 EC2에 SSH 접속, duckonback:dev 빌드 및 duckon-app-dev 컨테이너 재기동
+* **Google**: [https://console.cloud.google.com](https://console.cloud.google.com)
 
-master 브랜치:
+  * OAuth 동의화면(외부/내부), 범위: `email`, `profile`
+  * 승인된 리디렉션: `.../login/oauth2/code/google`
+* **Naver**: [https://developers.naver.com](https://developers.naver.com)
 
-build → deploy(prod)
+  * 서비스 URL/소개자료 필요. **이름(email) 활용 캡처** 첨부 요구될 수 있음(검수 반려 포인트).
+  * 리디렉션: `.../login/oauth2/code/naver`
+* **Kakao**: [https://developers.kakao.com](https://developers.kakao.com)
 
-prod용 EC2에 SSH 접속, duckonback:prod 빌드 및 duckon-app-prod 재기동
+  * 플랫폼 → 웹 도메인 등록(`https://duckon.site`), Redirect: `.../login/oauth2/code/kakao`
 
-원격 스크립트 주요 동작
+> **포팅 매뉴얼에 꼭 명시**: 콘솔 위치, 등록할 Redirect URI, `env.properties` 키명, 필요한 권한(스코프).
+> 검수 문서(특히 Naver)는 서비스 소개 PDF/캡처를 `exec/`에 포함 권장.
 
-/home/$USER/memeduck에 레포 클론/업데이트
+### 6.2 AWS S3 (이미지 업로드)
 
-duckon-net 네트워크 생성(이미 있으면 통과)
+* 액세스 키/시크릿 키, 리전, 버킷명 필요
 
-backend/Dockerfile로 이미지 빌드
+* SDK: `software.amazon.awssdk:s3:2.32.10`
 
-기존 컨테이너(duckon-app-dev 또는 duckon-app-prod) 종료 후 새 이미지로 컨테이너 기동
+* 권한 최소화(putObject/getObject), 퍼블릭 읽기 정책은 필요 최소 범위로 설정
 
-헬스체크: http://127.0.0.1:8080/actuator/health 또는 /api/actuator/health 에서 200/401 허용
+* 액세스 키/시크릿 키, 리전, 버킷명 필요
 
-운영 전환 시에는 master 전용 잡(duckonback:prod, 포트 바인딩 최소화 + 프록시 뒤 운용)으로 분리하여, dev/prod가 섞이지 않도록 구성하는 것을 권장합니다.
+* SDK: `software.amazon.awssdk:s3:2.32.10`
 
-6) 프로젝트 설정 파일 & 비밀 관리
+* 권한 최소화(putObject/getObject), 퍼블릭 읽기 정책은 필요 최소 범위로 설정
 
-Backend
+### 6.3 Redis / MongoDB
 
-src/main/resources/application.properties
-→ 환경변수 기반 ${KEY} placeholder만 유지 (민감정보 직접 기입 금지)
+* Redis: 캐시/임시 저장. 로컬 바인드(127.0.0.1)로 외부 노출 최소화
+* MongoDB: 채팅 등 비정형 데이터 보관
 
-(필요 시) application-dev.properties, application-prod.properties
-→ 공통 설정 + 프로필별 차이만 정의
+### 6.4 (선택) 번역 서비스 – HuggingFace
 
-Infra
+* 모델: `facebook/m2m100_418M` + Marian 라우팅 일부
+* 토큰: `HF_TOKEN` 또는 `HUGGINGFACE_HUB_TOKEN`
+* Redis 캐시 적용 (키: `mt:<route>:<sha1>:<src>:<tgt>:v7`)
 
-/etc/nginx/conf.d/duckon.conf – 리버스 프록시 설정
+---
 
-(선택) docker-compose.yml – 로컬 개발/테스트용
+## 7) DB 덤프 (최신본 포함)
 
-기타
+> 덤프 파일은 `exec/db/` 디렉터리에 포함하세요.
 
-DB 초기 스키마/덤프: /exec/db/* 등 (있을 경우)
+### 7.1 MySQL 덤프/복구
 
-모든 시크릿(JWT, DB PW, S3 키, OAuth 클라이언트 시크릿, OpenAI Key 등)은
+```bash
+# 덤프 (스키마+데이터)
+$ mysqldump -h <host> -P <port> -u <user> -p --databases duckon > exec/db/mysql_duckon_YYYYMMDD.sql
 
-GitLab → Settings → CI/CD → Variables 에 등록해서 사용
+# 복구
+$ mysql -h <host> -P <port> -u <user> -p < exec/db/mysql_duckon_YYYYMMDD.sql
+```
 
-7) 외부 서비스 사용 정리
-7.1 AWS S3/CloudFront
+### 7.2 MongoDB 덤프/복구
 
-버킷:
+```bash
+# 덤프
+$ mongodump --uri="mongodb://<host>:27017/duckon" --out exec/db/mongo_YYYYMMDD/
 
-일반 업로드: duckon-bucket
+# 복구
+$ mongorestore --uri="mongodb://<host>:27017/" exec/db/mongo_YYYYMMDD/
+```
 
-밈 이미지:
+> Redis는 영속 데이터베이스가 아니므로 스냅샷 필요 시 RDB/AOF 정책에 따라 별도 백업.
 
-dev: memeduck-memes-dev
+---
 
-prod: memeduck-memes-prod
+## 8) 시연 시나리오 (스크립트)
 
-CDN:
+> **목표:** “한 번에 무엇을 하는 서비스인지”를 1\~3분 내 설득력 있게 전달
 
-dev: https://dn9z1o6i8w44p.cloudfront.net
+1. **랜딩 진입**
 
-prod: https://d23breqm38jov9.cloudfront.net
+   * `https://duckon.site` 접속 → 홈: 추천 아티스트/트렌딩 방 노출
 
-사용 방식:
+2. **소셜 로그인**
 
-Backend가 이미지/파일을 S3에 업로드
+   * (Google 예시) 로그인 → 상단 프로필/닉네임 표시
 
-클라이언트에는 MEME_CDN_BASE_URL + object key 형태의 URL 제공
+3. **방 생성 & 유튜브 동시 시청**
 
-7.2 OAuth2 (소셜 로그인)
+   * “방 만들기” → 방 제목 입력 → 유튜브 URL 추가
+   * 다른 영상 **추가** 후 **재생 시작**
 
-지원 로그인: Google, Kakao, Naver
+4. **플레이리스트 관리**
 
-환경변수:
+   * 드래그로 **순서 변경**
+   * 특정 항목 **삭제**
 
-GOOGLE_ID, GOOGLE_SECRET
+5. **실시간 채팅**
 
-KAKAO_ID, KAKAO_SECRET
+   * 메시지 전송 → 다른 클라이언트(보조 브라우저)에서 실시간 수신 확인
+   * (옵션) 번역 토글은 현재 **운영 비활성** 안내
 
-NAVER_ID, NAVER_SECRET
+6. **권한/안전 기능**
 
-Redirect URI 패턴:
+   * 방장 위임(또는 방 폭파), 유저 **신고** 버튼 UI 확인
 
-{BASE_URL}/login/oauth2/code/{registrationId}
-예) https://duckon.site/login/oauth2/code/google
+7. **프로필/팔로우(있다면)**
 
-7.3 OpenAI API
+   * 아티스트 페이지/팔로우 인터랙션 간단 소개
 
-용도: 번역/AI 기능
+8. **로그아웃**
 
-환경변수:
+   * 세션 종료 후 메인 복귀
 
-OPENAI_API_KEY
+> 데모 전 체크리스트: OAuth 동작, Nginx 413 미발생, WS 정상, DB 연결, 이미지 업로드(S3) 확인.
 
-OPENAI_MODEL (예: gpt-5.1, 기본값 gpt-5-nano)
+---
 
-특징: 서버-사이드에서만 호출 (클라이언트에 키 노출 금지)
+## 9) 문제 해결(FAQ)
 
-7.4 Youtube IFRAME API
+* **413 Request Entity Too Large**: Nginx `client_max_body_size` 상향 (예: 20m)
+* **소셜 로그인 실패**: 각 콘솔 **리다이렉트 URI**/도메인 등록 재확인, HTTPS 사용
+* **WS 끊김**: 프록시의 `Upgrade/Connection` 헤더 설정 확인, 보안 그룹 443 허용
+* **번역 서버 메모리 초과**: 모델 경량화, `MAX_CHARS` 축소, 번역 API 경로 프록시 해제
 
-용도: 방송/영상 재생
+---
 
-환경변수: YOUTUBE_API_KEY
+## 10) GitLab Runner 간단 파이프라인 예시
 
-프론트 사용: react-youtube 또는 직접 IFRAME 삽입
+> 실제 Runner는 EC2 상에서 동작 중. 아래는 참고 템플릿입니다.
 
-7.5 Translation Service
+```yaml
+stages: [build, deploy]
 
-내부 번역 API:
+build-back:
+  stage: build
+  script:
+    - cd backend
+    - ./gradlew clean build -x test
+    - docker build -t registry.example.com/duckon/back:$CI_COMMIT_SHORT_SHA .
+    - docker push registry.example.com/duckon/back:$CI_COMMIT_SHORT_SHA
+  only: [main]
 
-Base URL: TRANSLATE_BASE_URL=http://<HOST>:8089
+build-front:
+  stage: build
+  script:
+    - cd frontend
+    - npm ci && npm run build
+    - docker build -t registry.example.com/duckon/front:$CI_COMMIT_SHORT_SHA .
+    - docker push registry.example.com/duckon/front:$CI_COMMIT_SHORT_SHA
+  only: [main]
 
-Timeout: TRANSLATE_TIMEOUT_MS=15000
+deploy:
+  stage: deploy
+  script:
+    - ssh ec2-user@<EC2_HOST> 'docker pull ... && docker compose up -d'
+  only: [main]
+```
 
-OpenAI 번역과 조합하여 사용 가능
+---
 
-7.6 Mail (Gmail SMTP)
+## 11) 라이선스 고지/오픈소스
 
-용도: 이메일 인증 코드 발송, 알림 메일
+* Spring Boot, Redis/Mongo/MySQL Docker 이미지, AWS SDK v2, jjwt, springdoc, lingua, Caffeine
+* 번역: HuggingFace Transformers, Marian, M2M100 (해당 라이선스 준수)
 
-환경변수:
+---
 
-SMTP_SERVER, SMTP_PORT
+## 12) 부록: Backend/Frontend 의존성 요약
 
-SMTP_ID, SMTP_PW
+### Backend Gradle 주요 의존성
 
-SMTP_SSL, SMTP_STARTTLS
+* `spring-boot-starter-web / data-jpa / security / oauth2-client / websocket / cache`
+* DB: `mysql-connector-j:9.3.0`, `spring-boot-starter-data-mongodb`
+* Auth: `io.jsonwebtoken:jjwt-* 0.12.5`
+* Docs: `springdoc-openapi-starter-webmvc-ui:2.8.9`
+* AWS: `software.amazon.awssdk:s3:2.32.10`, `auth:2.32.10`
+* 기타: `lingua`, `caffeine`
 
-FROM_EMAIL, MAIL_BRAND
+### Frontend package.json 주요 항목
 
-EMAIL_CODE_TTL_SECONDS, EMAIL_CODE_LENGTH, EMAIL_SEND_PER_10M, EMAIL_VERIFY_PER_1H
-
-8) 의존성 요약
-Backend
-
-Core:
-
-spring-boot-starter-web
-
-spring-boot-starter-data-jpa
-
-mysql-connector-j
-
-Security/Validation:
-
-spring-boot-starter-security
-
-spring-boot-starter-validation
-
-spring-boot-starter-oauth2-client
-
-JWT:
-
-io.jsonwebtoken:jjwt-*
-
-Cache/실시간:
-
-spring-boot-starter-data-redis
-
-WebSocket/STOMP 관련 의존성 (필요 시)
-
-Data:
-
-spring-boot-starter-data-mongodb (또는 spring-data-mongodb)
-
-OpenSearch Java Client
-
-Infra/연동:
-
-AWS SDK for S3
-
-기타:
-
-spring-boot-starter-mail
-
-spring-boot-starter-actuator
-
-Lombok, test 의존성 등
+* React 19, Vite 7, TypeScript 5.8, Tailwind 4
+* 상태/데이터: `@tanstack/react-query`, `zustand`, `axios`
+* UI/아이콘: `@headlessui/react`, `lucide-react`
+* 동시시청/통신: `react-youtube`, `sockjs-client`, `@stomp/stompjs`
