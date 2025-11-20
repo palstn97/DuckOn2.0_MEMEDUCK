@@ -158,7 +158,10 @@ deploy_backend_prod:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "master"'
     - when: never
-  needs: [build_backend]
+  # 🔧 여기 수정: build_backend 가 없을 때도 파이프라인이 생성되도록 optional needs 사용
+  needs:
+    - job: build_backend
+      optional: true
   before_script:
     - *before_aws_cli
     - '[ -n "$AWS_ACCESS_KEY_ID_PROD" ] || { echo "Missing: AWS_ACCESS_KEY_ID_PROD"; exit 1; }'
