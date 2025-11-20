@@ -2,6 +2,7 @@ import {BrowserRouter, Routes, Route, useLocation} from "react-router-dom";
 import HomePage from "./pages/HomePage";
 import SignupPage from "./pages/SignupPage";
 import LoginPage from "./pages/LoginPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import MainLayout from "./layouts/MainLayout";
 import ArtistListPage from "./pages/ArtistListPage";
 import ArtistDetailPage from "./pages/ArtistDetailPage";
@@ -48,7 +49,7 @@ function App() {
             <Route path="mypage" element={<MyPage />} />
             <Route path="/user/:userId" element={<OtherUserPage />} />
             <Route path="/leaderboard" element={<LeaderboardPage />} />
-            <Route path="/account/delete" element={<AccountDeletePage />} />
+            {/* <Route path="/account/delete" element={<AccountDeletePage />} /> */}
           </Route>
 
           {/* 푸터가 없는 페이지들 */}
@@ -62,11 +63,13 @@ function App() {
           {/* 레이아웃이 필요 없는 페이지들 */}
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/live/:roomId" element={<LiveRoomPage />} />
           <Route path="/artist/:artistId/fan" element={<AppChatRecommandPage />} />
           <Route path="oauth2/success" element={<OAuth2RedirectHandler />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/child-safety" element={<ChildSafetyPage />} />
+          <Route path="/account/delete" element={<AccountDeletePage />} />
 
           {/* 404 페이지 */}
           <Route path="*" element={<NotFoundPage />} />
